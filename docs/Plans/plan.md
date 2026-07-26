@@ -1,908 +1,527 @@
-# Peer-to-Peer Cloud Gaming & Compute Marketplace
+# Authorized Cloud Gaming & Compute Marketplace
 
-## Full Product & Engineering Plan
+## Decision-Gated Product and Engineering Plan
 
-**Document type:** Master roadmap (architecture, phases, legal posture, milestones)  
-**Role of this doc:** Single source of truth for what we build, in what order, and why  
-**Last aligned decisions:** Cloud gaming first · multi-title legal AAA · hybrid Python + C++ stack · General Compute as Phase 2+  
+**Status:** Founder operating plan · revised 2026-07-26
+**Owner model:** Solo builder, manual coding, AI used only for planning/review
+**Planning horizon:** Gates and evidence—not calendar promises
+**Scope:** A lawful, safe way to validate remote interactive gaming before considering a marketplace or general compute.
 
----
-
-## 1. Vision
-
-Build a **decentralized marketplace for computing resources** — a pragmatic “Peer-to-Peer AWS” — where people with idle high-end hardware (Providers) sell capacity to people who need it (Consumers).
-
-### 1.1 Core value proposition
-
-| Actor | Value |
-|--------|--------|
-| **Consumer** | Play AAA games (and later run heavy compute) without owning a $1,500–$3,000 GPU rig |
-| **Provider** | Monetize idle hardware with clear safety limits and isolation |
-| **Platform** | Match supply/demand, meter usage, settle payments, enforce policy — without running the heavy workloads |
-
-### 1.2 Pragmatic hybrid model
-
-We do **not** put all execution on our servers (too expensive, high latency).  
-We do **not** go fully trustless/blockchain-first (too slow to ship, weak UX for gaming).
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  CENTRAL ORCHESTRATOR (our AWS backend)                  │
-│  Auth · matching · catalog · sessions · metrics · pay    │
-└────────────────────────────┬─────────────────────────────┘
-                             │ control plane (HTTPS / WSS)
-         ┌───────────────────┼───────────────────┐
-         ▼                   ▼                   ▼
-   Provider Agent      Provider Agent      Provider Agent
-         │                   │                   │
-         ▼                   ▼                   ▼
-   Stream Host (C++)   Stream Host (C++)   Stream Host (C++)
-   Game on Provider    Game on Provider    Game on Provider
-         │                   │                   │
-         └──────── P2P / direct media (WebRTC) ──┘
-                             │
-                             ▼
-                      Consumer Client
-```
-
-- **Centralized:** identity, catalog, matching, session lifecycle, billing, trust & safety  
-- **Decentralized:** actual pixels, encode, decode, and (later) batch compute execution  
+> **The venture is not “rent strangers’ Steam libraries.”** The initial product is an authorized remote-gaming service using dedicated, trusted hosts. A paid public marketplace is permitted only when title rights, host safety, network privacy, and unit economics have passed the gates below.
 
 ---
 
-## 2. Product surfaces
+## 1. Executive decision
 
-### 2.1 Vertical A — Cloud Gaming (PRIMARY / first to market)
+### 1.1 The problem
 
-**Goal:** Consumers play **legally supported multi-title AAA games** on a Provider’s machine via ultra-low-latency streaming.
+A consumer with a weak device cannot reliably use high-end interactive software. A Provider has underutilized capable hardware. The platform can coordinate identity, availability, sessions, safety controls, metering, and support without carrying the media workload itself.
 
-**Characteristics:**
+### 1.2 The original opportunity, narrowed correctly
 
-- Real-time interactive session  
-- WebRTC (P2P preferred; relay fallback when NAT fails)  
-- Hardware encode (NVENC / AMF / QuickSync)  
-- SRTP encryption on media  
-- Input pipeline with OS-level chord sanitization  
-- Window-scoped capture (game only, not full desktop by default)  
+The long-term opportunity remains a two-sided marketplace for GPU-backed interactive sessions and, later, batch compute. The near-term risk is treating four unproven claims as solved:
 
-**Catalog posture:** Multi-title from day one — games are **data (launch profiles)**, not hard-coded product modes.
+1. remote gaming works at acceptable quality;
+2. a Provider can safely expose a host;
+3. game/store rights permit the proposed commercial use; and
+4. supply, demand, relay cost, and payouts create positive contribution margin.
 
-### 2.2 Vertical B — General Compute (SECONDARY / after gaming spine)
+This plan proves those claims in order. It never uses “BYOL” as a substitute for title-specific commercial permission.
 
-**Goal:** Batch jobs (Blender, encoding, ML training, etc.) on Provider GPUs/CPUs.
+### 1.3 Non-negotiable launch constraints
 
-**Characteristics:**
+| Constraint | Decision |
+|---|---|
+| Game rights | No paid/public availability for a title unless written authorization or counsel-approved, documented rights evidence exists. |
+| Store accounts | Never share, rent, transfer, or collect a Provider’s or Consumer’s store credentials. |
+| Host class | Initial alpha hosts are dedicated test machines or managed trusted fleet hardware—not a Provider’s everyday personal computer. |
+| Safety claim | Window capture and input filtering are defense-in-depth, not a security boundary. The product makes no stronger claim. |
+| Media | Reuse/evaluate proven components; do not begin a greenfield C++ media stack. |
+| Networking | TURN is a first-class reliability and cost dependency; never rely on public/free TURN infrastructure. |
+| Payments | No money moves until the session ledger, refund policy, jurisdiction, payment-provider availability, and Provider onboarding route are designed and tested. |
+| Compute | General compute is a separate product/security decision after gaming has earned it. |
 
-- High throughput over low latency  
-- Secure file transfer (TLS)  
-- Docker isolation  
-- VRAM/GPU allocation and hard resource caps  
-- Volatile workspace wiped on completion  
+### 1.4 Explicit stop / pivot criteria
 
-### 2.3 Why gaming first
+Stop or pivot the gaming marketplace path if any condition is true:
 
-| Reason | Detail |
-|--------|--------|
-| Clear consumer story | “Play AAA on any device” is easier to demo and market than “rent a GPU” |
-| GTM / hype | Position for GTA 6–era demand without depending on a single unreleased title |
-| Shared spine | Orchestrator + agent + session lifecycle transfer cleanly to Compute later |
-| Monetization intuition | Hourly/session pricing for streams is well understood |
+- no commercially usable, rights-cleared title or partner path exists;
+- the selected media stack cannot meet the internal quality gate on representative networks;
+- dedicated-host safety cannot be made acceptable for an invite-only alpha;
+- more than 20% of representative attempts require relay and the modeled relay cost cannot fit pricing; or
+- trusted Provider supply does not remain online long enough to serve real testers.
 
-**Note on GTA 6:** Console hype ≠ PC Provider supply. PC release is expected later than console. We ship multi-title streaming **now** on currently available AAA titles; GTA 6 PC becomes a **catalog entry + launch profile** when license posture and install base allow — not a rewrite.
+A failed gate is useful evidence, not a reason to add features.
 
 ---
 
-## 3. Legal & trust model (non-negotiable)
+## 2. Product definition and beachhead
 
-### 3.1 Operating model: BYOL + technical allowlist
+### 2.1 Product lanes
 
-We sell **stream / compute time**, not game copies.
+| Lane | What it is | Who may use it | Money | Exit condition |
+|---|---|---|---|---|
+| **Technical demo** | Remote-streaming proof on owned/trusted machines | Founder and explicit test participants | None | Media, safety, and session telemetry proven |
+| **Authorized gaming beta** | Limited catalog of titles with documented permission path | Invite-only Consumers and approved Providers | Optional only after payment gate | Repeatable safe, supported sessions |
+| **Marketplace** | Multi-Provider matching and payouts | Public or broader cohort | Yes | Legal, trust, economics, operations all proven |
+| **Compute** | Isolated batch jobs on Provider hardware | Separate opt-in cohort | Separate | Independent sandbox/security acceptance |
 
-| Rule | Implementation |
-|------|----------------|
-| **Bring Your Own License (BYOL)** | Provider (and Consumer when required by publisher) holds a legitimate store license |
-| **Allowlist only** | Only titles with defined legal status + technical profile appear in catalog |
-| **No piracy path** | Agent rejects cracked/unsigned installs; verify store install markers |
-| **Honest status** | `supported` / `limited` / `unsupported` per title (anti-cheat, multiplayer, ToS) |
-| **Future partnerships** | Publisher / store cloud-allowlist deals (GeForce Now–style) for restricted titles |
+The technical demo may use a test application, open-licensed game, or title only where every participant is authorized. It is not evidence that a commercial title is cleared.
 
-### 3.2 What we do not build
+### 2.2 Beachhead record — must be locked before external alpha
 
-- Grey-market “shared account farm” as a product feature  
-- Shipping game binaries ourselves without rights  
-- Claiming every Steam game is legal to stream commercially  
+Do not choose “all gamers.” Fill and approve this record first:
 
-### 3.3 Per-title legal status fields (catalog)
+| Field | Decision to record |
+|---|---|
+| Initial geography | One country/region with nearby Providers and a viable payment route |
+| Consumer segment | One observable group with a shared acquisition channel |
+| Provider source | Named trusted hosts, gaming cafés, or managed fleet—not anonymous supply |
+| Authorized initial title(s) | One to three titles with title-review records |
+| Host hardware baseline | GPU, encoder, RAM, network uplink, Windows version, driver range |
+| Client baseline | Supported desktop browsers, input devices, bandwidth and latency expectations |
+| Beta capacity | Maximum concurrent sessions and support owner |
+| Privacy/residency posture | Data locations, retention, support/log access, consent text |
+
+### 2.3 Value hypotheses to test
+
+| Hypothesis | Evidence required | Falsification signal |
+|---|---|---|
+| Consumers value remote play | At least 10 invited testers complete sessions and state a willingness-to-use/willingness-to-pay range | Most testers abandon despite technically successful sessions |
+| Providers will supply capacity | At least 3 approved hosts maintain agreed availability for four weeks | Hosts are routinely unavailable or require manual rescue |
+| Browser client is viable | Measured end-to-end sessions meet the alpha quality threshold | Codec/input/browser limitations dominate complaints |
+| Economics may work | Measured relay, support, payment, and payout assumptions fit a proposed price | Contribution margin remains negative under conservative assumptions |
+
+---
+
+## 3. Legal, title, and account policy
+
+### 3.1 Operating rule
+
+A game appears in the commercial catalog only after the platform has a **Title Approval Record**. The standard Steam Subscriber Agreement licenses Steam content for personal, non-commercial use and restricts renting, licensing, hosting, and commercial exploitation unless permission is otherwise provided. Therefore, ownership of a game by a Consumer or Provider alone is not clearance for this service. See source **S1**.
+
+This is product risk management, not legal advice. Retain qualified counsel in the launch jurisdiction before commercial release.
+
+### 3.2 Title Approval Record
+
+Every candidate title contains the following immutable versioned record:
 
 ```text
-legal_status: byol_allowed | partner_only | blocked | under_review
-stores: steam | epic | rockstar | other
-multiplayer: full | limited | single_player_only
-notes: human-readable risk / QA notes
+title_id
+publisher / rights holder
+store(s) and applicable current terms URL
+rights_basis: written_permission | platform_program | counsel_approved | internal_demo_only | blocked
+rights_evidence_uri and review_date
+reviewer and escalation owner
+account_model: consumer_owned | provider_owned_authorized | other_authorized_model
+commercial_status: approved | conditional | blocked | expired
+multiplayer / anti-cheat status
+technical launch profile version
+capture profile version
+host requirements
+regions allowed
+support tier: experimental | supported | suspended
+expiry / re-review date
 ```
+
+`byol_allowed` is deliberately not a legal status. A record lacking evidence is `blocked` for commercial use.
+
+### 3.3 Account and game policy
+
+- The platform never asks for or stores store-account passwords, tokens, or MFA codes.
+- The platform never provides shared accounts, account farming, cracked binaries, license bypasses, or automated account activity.
+- The platform never claims a title is supported because it merely launches or streams.
+- Multiplayer and anti-cheat are opt-in per title only after compatibility and rights review.
+- A title can be suspended immediately if terms, rights evidence, technical safety, or publisher guidance changes.
+
+### 3.4 Commercial readiness legal gate
+
+Before the first paid session, require all of:
+
+1. counsel-approved service terms, Provider agreement, privacy notice, refund/dispute policy, and acceptable-use policy;
+2. title approval records for every commercial title;
+3. confirmation that the selected payment/payout provider supports the business and launch geography;
+4. age-rating/minor policy and jurisdictional tax review; and
+5. incident contact and takedown process.
 
 ---
 
-## 4. Security architecture
+## 4. Threat model and safety posture
 
-### 4.1 Provider protection — Gaming
-
-| Control | Purpose |
-|---------|---------|
-| Window-scoped capture | Consumer sees game, not Provider desktop/files |
-| Input sanitization | Block OS chords (Alt+Tab, Win, Ctrl+Alt+Del patterns, etc.) |
-| Process allowlist | Only approved launcher + game process trees |
-| Session isolation | Per-session temp profiles/dirs where feasible; cleanup on end |
-| Hardware caps | Agent enforces GPU temp / power / utilization kill switches (e.g. ≥ 85°C policy) |
-| Agent least privilege | Run with minimum rights needed; no silent admin escalation |
-
-### 4.2 Provider protection — General Compute (later)
-
-| Control | Purpose |
-|---------|---------|
-| Docker (or stronger) isolation | Malicious jobs cannot freely touch host FS |
-| Resource limits | CPU, RAM, GPU, disk, network quotas |
-| No host mounts by default | Only ephemeral workspace volume |
-| Auto-wipe | Destroy workspace on success/fail/timeout |
-| Image allowlist | Only approved base images / job images |
-
-### 4.3 Consumer protection
-
-| Control | Purpose |
-|---------|---------|
-| TLS for control plane & file transfer | Confidentiality in transit |
-| SRTP for media | Encrypted game stream / audio |
-| Volatile storage on Provider | No long-term retention of Consumer artifacts |
-| Wipe-on-complete | Policy-enforced cleanup |
-| Session tokens | Short-lived credentials for P2P signaling |
-
-### 4.4 Platform protection
-
-- Provider reputation / fraud signals  
-- Rate limits, abuse detection  
-- Signed agent builds and update channel  
-- Audit logs for session start/stop, game launched, wipe result  
-
----
-
-## 5. Tech stack (locked direction)
-
-### 5.1 Hybrid language strategy
-
-| Layer | Stack | Rationale |
-|-------|--------|-----------|
-| **Orchestrator** | Python, AWS, PostgreSQL | Fast iteration for APIs, matching, catalog, billing |
-| **Provider Agent (control plane)** | Python (v0); optional Go later for single binary | Heartbeat, library scan, launch/stop, policy |
-| **Stream Host (media plane)** | C++ and/or battle-tested C++-backed stack | Capture, NVENC/AMF/QSV, WebRTC, input |
-| **Virtualization (Compute)** | Docker | Isolation for batch jobs |
-| **Consumer client (v0)** | Browser WebRTC | Fastest validation |
-| **Consumer client (later)** | Native desktop / mobile | Better decode, gamepad, UX |
-
-**Principle:** C++ where latency is felt (pixels/input). Python where product changes weekly (marketplace).
-
-### 5.2 Reference architecture — Gaming session
-
-```
-Consumer Client                    Orchestrator                     Provider
-     │                                  │                              │
-     │  POST /sessions {game_id}        │                              │
-     │─────────────────────────────────►│                              │
-     │                                  │  match Provider (GPU+owns)   │
-     │                                  │─────────────────────────────►│
-     │                                  │  assign session              │
-     │◄──── signaling endpoints ────────│◄──── accept ─────────────────│
-     │                                  │                              │
-     │◄══════════ WebRTC media (P2P or relay) ═══════════════════════►│
-     │   video/audio ──► decode                                        │
-     │   input ────────► sanitize ──► inject                           │
-     │                                  │                              │
-     │  end session                     │  stop game · wipe · report   │
-     │─────────────────────────────────►│─────────────────────────────►│
-```
-
-### 5.3 Game as configuration (not code forks)
-
-Example catalog entry:
-
-```json
-{
-  "game_id": "cyberpunk_2077",
-  "title": "Cyberpunk 2077",
-  "legal_status": "byol_allowed",
-  "stores": ["steam", "epic"],
-  "min_vram_mb": 8192,
-  "min_ram_mb": 16384,
-  "launch": {
-    "type": "steam",
-    "app_id": "1091500"
-  },
-  "capture": {
-    "mode": "window",
-    "title_regex": ".*Cyberpunk.*"
-  },
-  "input": {
-    "block_os_chords": true,
-    "allow_gamepad": true
-  },
-  "session": {
-    "max_minutes_default": 240,
-    "idle_timeout_minutes": 15
-  },
-  "support_tier": "supported",
-  "notes": "v0 focus: single-player; multiplayer TBD"
-}
-```
-
-New AAA titles ship as **catalog + QA**, not platform rewrites.
-
----
-
-## 6. Domain model (core entities)
-
-| Entity | Description |
-|--------|-------------|
-| **User** | Account; roles Consumer and/or Provider |
-| **ProviderNode** | Registered machine + agent identity + capabilities |
-| **HardwareSnapshot** | GPU model, VRAM, driver, CPU, RAM, temps, free capacity |
-| **Game** | Catalog entry (metadata, legal, launch, capture) |
-| **ProviderGameInstall** | Detected install of allowlisted game on a node |
-| **Session** | Gaming (or later Job) lifecycle record |
-| **MatchOffer** | Assignment of Consumer request → ProviderNode |
-| **MeteringEvent** | Time slices, bitrate, disconnects (for billing) |
-| **Payment / Credit** | Later: wallet, payouts, holds |
-| **Job** (Compute) | Later: batch work unit, artifact URIs, exit status |
-
-### 6.1 Session states (Gaming)
+### 4.1 Assets and trust boundaries
 
 ```text
-requested → matching → assigned → launching → signaling → live → ending → completed
-                                              ↘ failed
-                                              ↘ cancelled
+Consumer browser ── TLS/WSS ── Orchestrator ── authenticated outbound channel ── Provider Agent
+      │                              │                                      │
+      └──── WebRTC: direct only when policy permits; otherwise relay ────────┘
+                                                                     │
+                                                            Media host / game
 ```
 
-### 6.2 Agent states
+Trust boundaries: browser↔orchestrator, agent↔orchestrator, client↔media path, agent↔media host, and deployment/update pipeline. Threat modeling must be updated whenever a boundary or privilege changes, following the OWASP approach in **S4**.
+
+### 4.2 Threats, controls, and residual risk
+
+| Threat | Required controls before external alpha | Residual risk / decision |
+|---|---|---|
+| Malicious Consumer affects Provider host | Dedicated host; non-admin game user; no shell/file-transfer/clipboard/desktop controls; process and launch allowlists; session maximums; emergency stop | Games and legacy Windows software remain complex; ordinary personal PCs are excluded |
+| Consumer sees Provider data | Dedicated machine; window/process capture binding; clean profile; no Provider personal data; preflight capture test | Capture bugs are possible; Provider agrees to dedicated-host restriction |
+| Compromised/rogue agent | Per-device enrollment; short-lived credentials; command authorization; signed releases; revoke/kill switch; audit trail | Host compromise cannot be fully prevented by the platform |
+| Stolen Consumer session | Short-lived, audience-bound session token; TLS; signaling authorization; no credentials in logs | Client compromise remains user-side risk |
+| Peer network/privacy exposure | Relay-only public-beta default until a documented privacy review permits direct P2P; disclose connection behavior | Direct P2P is an explicit later product decision |
+| Abuse, fraud, chargebacks | Invite-only users; rate limits; immutable metering; holds; delayed payouts; support review | Public fraud controls are a scale-phase problem |
+| Malicious update/dependency | Locked dependencies; SBOM; signed artifact and update manifest; staged rollout; rollback | Dependency zero-days remain possible |
+| Hardware damage / thermal event | Telemetry; per-node temperature/power policy; autonomous end/cooldown; no override by Consumer | Sensor availability differs by hardware |
+
+### 4.3 Dedicated-host baseline
+
+Initial Provider machines must:
+
+- have no personal files, personal browser profile, personal passwords, or personal work account access;
+- use a separate non-administrator Windows account for the service and games;
+- accept only allowlisted launch profiles and signed agent commands;
+- have automatic OS/game updates governed by a tested maintenance window;
+- report health, driver version, thermal state, and available capacity; and
+- be able to disconnect or kill every session locally.
+
+AppContainer/Windows Sandbox are research inputs, not assumed production solutions: legacy games and anti-cheat may not operate under them. Microsoft documents AppContainer as a restricted process environment and Windows Sandbox as disposable isolation; compatibility must be tested title-by-title (**S6**).
+
+### 4.4 Incident standards
+
+| Event | Immediate action | Evidence | Recovery gate |
+|---|---|---|---|
+| Unauthorized input/capture suspicion | End session, revoke session token, disable node | session events, agent/media logs, version IDs | Security review approves re-enable |
+| Agent compromise suspicion | Revoke node identity, block update channel, quarantine host | binary hash, host logs, signed release provenance | Host rebuilt/re-enrolled |
+| Financial dispute | Freeze related payout/ledger entries | immutable meter/event chain | Support decision and documented refund |
+| Thermal limit or repeated crash | End session, cooldown node | hardware snapshot and process exit | automated health check passes |
+
+---
+
+## 5. Architecture: small now, evolvable later
+
+### 5.1 Components and ownership
+
+| Component | Responsibility | Initial technology | Must not do |
+|---|---|---|---|
+| Orchestrator | Auth, enrollment, catalog, matching, state machine, session commands, metering events | Python/FastAPI + PostgreSQL | Encode media or hold game credentials |
+| Provider Agent | Hardware scan, heartbeat, command validation, lifecycle supervision, local kill switch | Python v0 | Accept arbitrary shell commands or unapproved executables |
+| Media adapter | Launch an evaluated host stack; expose bounded lifecycle/status interface | Thin adapter around selected stack | Become a new streaming engine |
+| Web client | Session request, signaling, playback, bounded input, consent and diagnostics | Browser/WebRTC | Bypass server authorization |
+| TURN/STUN | Authenticated ICE service and relay capacity | Managed or operated service | Be a free/public shared dependency |
+| Observability | Correlated logs, metrics, traces, audit events | Structured service | Store secrets, raw game video, or input content by default |
+
+### 5.2 Media-stack decision gate
+
+Do not assume Sunshine is a browser-WebRTC host. Sunshine is primarily a Moonlight/GameStream-compatible host and GPLv3; its web interface is configuration/pairing rather than an official browser game-streaming client. Treat it as one candidate, review license obligations, and run an integration spike before selecting it (**S3**).
+
+**Spike candidates:**
+
+1. a proven host with a supported browser/WebRTC media path;
+2. a thin bridge/adaptor only if its license, maintenance, and latency meet requirements; and
+3. native-client fallback for the technical demo if browser viability fails.
+
+**Spike acceptance:** demonstrate ten repeatable remote sessions on two representative network paths; collect time-to-first-frame, resolution/fps, RTT, bitrate, codec, input behavior, direct/relay result, and failure reason. Choose or reject a stack in a written ADR. No production media implementation before this decision.
+
+### 5.3 WebRTC requirements
+
+WebRTC does not prescribe signaling; it needs a separately authorized signaling service and ICE servers. STUN/TURN candidates are exchanged through signaling, and TURN relays traffic when direct connectivity fails (**S2**). The system therefore requires:
+
+- authenticated signaling messages scoped to one session and one peer role;
+- ephemeral TURN credentials scoped by expiry, session, and quota;
+- trickle ICE support and explicit connection-state timeouts;
+- metrics for direct versus relay connection, selected candidate class, connection duration, and disconnect reason;
+- an admission policy based on measured network preflight, not optimistic matching; and
+- relay capacity/cost modeled before public launch.
+
+### 5.4 Control-plane protocol invariants
+
+- A node receives an opaque immutable `node_id`; human-readable names are metadata only.
+- Enrollment is single-use and short-lived. The agent generates a device keypair locally; the control plane binds the public key to a node after approval.
+- Agent-to-orchestrator communication is outbound initiated; the platform never opens an arbitrary inbound management port on a Provider host.
+- Every command has `command_id`, `session_id`, expected state/version, expiry, issuer, and signature/authorization context.
+- Commands are idempotent. The agent persists command outcome before acknowledging it.
+- A session cannot become `live` until both agent and media adapter report the expected state.
+- A missing heartbeat ends the lease; it does not prove the host process stopped. Reconciliation is mandatory.
+- Every state transition emits an append-only audit event with correlation IDs.
+
+### 5.5 Core data model
+
+| Entity | Invariants |
+|---|---|
+| User | One account can hold Consumer and Provider roles; status, consent, and risk state are explicit |
+| ProviderOrganization | Owns nodes, payout identity later, policy and support contacts |
+| ProviderNode | One enrollment identity, desired/observed state, capacity lease, software/driver compatibility |
+| HardwareSnapshot | Timestamped and versioned; never treated as permanent truth |
+| GameTitle / TitleApproval | Catalog metadata separated from rights evidence and technical profile version |
+| ProviderGameInstall | Verified install/technical profile observation, not proof of commercial rights |
+| Session | Immutable request + authoritative lifecycle; one active lease per constrained resource |
+| SessionCommand | Idempotency and reconciliation record |
+| MeteringEvent | Append-only event source; computed invoice is derived, never hand-edited |
+| AuditEvent | Security and lifecycle evidence, retention class, correlation ID |
+| PaymentLedger / Payout | Future, double-entry-like immutable accounting records; never inferred from client reports |
+
+### 5.6 State machines
 
 ```text
-offline → registering → online_idle → reserved → streaming → draining → online_idle
-                                                      ↘ error_cooldown
+Session:
+requested → eligibility_checked → offered → accepted → reserved → launching
+→ signaling → connecting → live → ending → cleaned → completed
+                                  ↘ failed
+                                  ↘ cancelled
+
+Node:
+pending_approval → enrolled → online_idle → reserved → launching → streaming
+→ draining → online_idle
+       ↘ quarantined / revoked / maintenance / error_cooldown
 ```
 
----
-
-## 7. Phase roadmap overview
-
-| Phase | Name | Primary outcome |
-|-------|------|-----------------|
-| **0** | Foundations | Repo, standards, contracts, environments |
-| **1** | Control plane spine | Orchestrator + Agent can register, heartbeat, list capacity |
-| **2** | Multi-title catalog | Games as data; library detection; match on “owns game X” |
-| **3** | Streaming MVP | One end-to-end playable session (allowlisted titles) |
-| **4** | Hardening & security | Capture policy, input sanitization, caps, wipe, observability |
-| **5** | Closed beta marketplace | Multi-Provider, multi-Consumer, basic UX, waitlist quality |
-| **6** | Metering & payments | Credits, usage, Provider payouts (MVP) |
-| **7** | Scale & reliability | NAT/relay, multi-region, QoS, anti-fraud |
-| **8** | General Compute vertical | Docker jobs, file I/O, GPU allocation |
-| **9** | Growth & partnerships | Publisher deals, mobile clients, GTA 6 PC readiness |
-| **10** | Platform maturity | SLAs, enterprise, advanced scheduling, global supply |
-
-Phases are **sequential for the critical path**, but some workstreams (docs, legal review of titles, branding) can run in parallel.
+Only the orchestrator advances authoritative business state. The agent reports observed facts; reconciliation resolves disagreement. `cleaned` requires cleanup evidence before the resource returns to `online_idle`.
 
 ---
 
-## 8. Phase 0 — Foundations
+## 6. Quality, reliability, and economics
 
-### 8.1 Goal
+### 6.1 Quality measurements
 
-Create a clean base so every later phase builds on the same contracts and quality bar.
+Do not use “playable” as the sole metric. Store per session:
 
-### 8.2 Scope
+- request-to-offer, offer-to-launch, launch-to-first-frame, and total time-to-first-frame;
+- selected video codec, resolution, frame rate, bitrate, packet loss, RTT/jitter where available;
+- direct/relay path and relay bytes;
+- input capture/injection errors;
+- game/stream-host exit cause;
+- Consumer and Provider post-session quality score; and
+- all software/driver/profile versions.
 
-- Monorepo (or polyrepo with clear boundaries) layout:
-  - `orchestrator/` — Python API service  
-  - `agent/` — Provider control-plane daemon  
-  - `stream-host/` — C++ / media plane (or integration wrapper)  
-  - `catalog/` — game definitions (YAML/JSON) + validation  
-  - `clients/web/` — Consumer web client  
-  - `docs/` — ADRs, runbooks, this plan  
-  - `infra/` — local compose, later IaC  
-- Engineering standards: lint, format, CI skeleton, commit conventions  
-- Environment matrix: local dev, staging, production (AWS)  
-- Secrets handling pattern (never commit keys)  
-- ADR-001: hybrid architecture + language split  
-- ADR-002: BYOL + allowlist legal model  
+### 6.2 Gates, not false precision
 
-### 8.3 Deliverables
+| Gate | Minimum evidence | Outcome |
+|---|---|---|
+| Technical demo | 10 instrumented sessions, two network conditions, clean session termination | Select/reject media stack |
+| Internal alpha | 20 sessions across at least 3 dedicated hosts; ≥80% reach `live`; every failure categorized | Fix dominant failure modes |
+| Invite beta | 50 sessions with approved users; stable host operation; no unresolved high-severity safety incident | Decide whether to broaden cohort |
+| Paid beta | Approved title rights; ledger reconciliation; conservative unit economics; refund/payout process tested | Enable restricted payments |
 
-- [ ] Repo skeleton with README per component  
-- [ ] OpenAPI / protobuf draft for control APIs  
-- [ ] Local Postgres via Docker Compose  
-- [ ] CI: lint + unit test hooks  
+Targets become stricter only after baseline measurements. The plan avoids inventing latency thresholds before a real network/host baseline exists.
 
-### 8.4 Exit criteria
+### 6.3 Unit economics model
 
-Any engineer can clone, run orchestrator + empty agent against local Postgres, and hit health endpoints.
+For each session, calculate before payment launch:
 
-### 8.5 Explicitly out of scope
+```text
+net contribution = consumer charge
+                 - payment processing and refund reserve
+                 - Provider earning / incentive
+                 - TURN relay egress and infrastructure
+                 - support, fraud, and operational allocation
+```
 
-Streaming, payments, Docker compute, production AWS scale-out.
+Report relay percentage, median relay bytes, support minutes/session, failed-launch cost, gross margin before/after Provider earning, and payout reserve. If the conservative model is negative, do not solve it with opaque pricing or scale.
 
----
+### 6.4 Payments boundary
 
-## 9. Phase 1 — Control plane spine
+A marketplace payment system includes connected accounts, onboarding/KYC, charges, transfers, and payouts; use a provider’s marketplace product rather than storing payment data or implementing payouts yourself. Stripe Connect is one candidate, subject to geography and business approval (**S5**).
 
-### 9.1 Goal
+Paid launch requires:
 
-Prove the **marketplace nervous system**: Providers appear online with hardware facts; Orchestrator tracks them.
-
-### 9.2 Scope
-
-**Orchestrator**
-
-- User auth (API keys or JWT for v0; OAuth later)  
-- `POST /providers/register`  
-- `POST /providers/heartbeat`  
-- `GET /providers` (internal/admin)  
-- PostgreSQL models: User, ProviderNode, HardwareSnapshot  
-- Basic auth middleware  
-
-**Agent**
-
-- Config: orchestrator URL, node credentials  
-- Startup registration  
-- Periodic heartbeat (GPU name, VRAM, driver, CPU, RAM, load, optional temp)  
-- Graceful offline / last-seen TTL (orchestrator marks stale nodes offline)  
-
-### 9.3 Deliverables
-
-- [ ] Working register + heartbeat loop  
-- [ ] DB migrations  
-- [ ] Integration test: agent appears online within N seconds  
-
-### 9.4 Exit criteria
-
-A physical or VM Provider stays `online` in orchestrator while agent runs; goes `offline` after missed heartbeats.
-
-### 9.5 Risks & mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| GPU telemetry inconsistent across vendors | Start with NVIDIA + nvidia-smi; abstract interface for AMD/Intel later |
-| Clock skew / zombie nodes | Heartbeat TTL + explicit shutdown webhook |
+- idempotent payment and webhook handling;
+- a session ledger reconciled against authoritative lifecycle events;
+- holds/authorization policy, cancellation policy, refund route, and dispute freeze;
+- delayed/reviewable Provider payouts; and
+- tax, KYC, sanctions, and age obligations reviewed for the chosen jurisdiction.
 
 ---
 
-## 10. Phase 2 — Multi-title catalog & library awareness
+## 7. Milestone roadmap
 
-### 10.1 Goal
+### M0 — Local control-plane hello world
 
-Make the platform **game-agnostic**: match is “who can host *this* allowlisted title,” not “run arbitrary exe.”
+**Goal:** developer can run Postgres, orchestrator health, and an agent health ping locally.
 
-### 10.2 Scope
+**Exit:** reproducible local setup; health endpoint distinguishes API and database failure; no secret in Git; basic test/smoke instructions work.
 
-**Catalog service / module**
+**Not included:** remote process launch, public exposure, marketplace logic, or stream host.
 
-- Store game definitions (files in repo for v0; admin CMS later)  
-- Validate schema (min VRAM, launch type, legal_status)  
-- Public `GET /games` (only non-blocked)  
-- Internal game detail for matching  
+### M1 — Provider identity and observed availability
 
-**Agent library detection (Steam first)**
+**Goal:** safely know whether an approved dedicated node is available.
 
-- Detect Steam install path  
-- Resolve allowlisted `app_id`s present on disk  
-- Report `ProviderGameInstall[]` on heartbeat or dedicated sync  
-- Refuse non-allowlisted / unverified installs for launch  
+**Scope:** enrollment flow, node approval/revocation, agent config, heartbeats, hardware snapshot, TTL/offline transition, audit events, and migrations.
 
-**Matching precursor**
+**Exit:** a node is online only while a valid lease is renewed; revoked nodes reject new commands; lost-heartbeat state is visible and reconciled.
 
-- Query: Providers online + free + meet min hardware + have `game_id` installed  
+### M2 — Media feasibility spike
 
-### 10.3 Deliverables
+**Goal:** prove or disprove selected remote-media path before building a marketplace.
 
-- [ ] Initial catalog: **3–5** QA’d AAA titles (single-player friendly preferred)  
-- [ ] Steam detection MVP  
-- [ ] API: list games; list Providers capable of game X  
+**Scope:** one test application/authorized title, one trusted host, browser or declared native fallback, authenticated signaling, TURN test, telemetry harness, media-stack ADR.
 
-### 10.4 Exit criteria
+**Exit:** ten instrumented sessions demonstrate selected media path; direct and relay behavior are measured; a build-versus-integrate decision is recorded.
 
-Given game_id, orchestrator returns only Providers that are online, capable, and have a verified install.
+### M3 — Safe internal session vertical slice
 
-### 10.5 Explicitly out of scope
+**Goal:** request → approved match → bounded launch → stream → end → cleanup → evidence.
 
-Epic/Rockstar full detection, perfect DRM edge cases, automatic updates of games.
+**Scope:** session state machine, resource lease, command idempotency, launch/capture/input policy, local kill switch, cleanup evidence, reconciliation, failure UX.
 
-### 10.6 Parallel workstream
+**Exit:** three dedicated hosts complete 20 internal sessions with categorized failures; the host cannot launch arbitrary programs through the platform.
 
-Legal/tech review pipeline for adding titles (checklist: ToS notes, anti-cheat, launch reliability, capture title regex).
+### M4 — Rights and beta readiness
 
----
+**Goal:** transform a technical demo into a lawful, bounded product candidate.
 
-## 11. Phase 3 — Streaming MVP (end-to-end)
+**Scope:** title approval record, counsel review, terms/policies, threat model, incident runbook, signed agent/update plan, privacy and retention decisions, cohort selection.
 
-### 11.1 Goal
+**Exit:** all commercial-readiness requirements in Section 3.4 are approved. If no title is approved, remain an internal technical demo; do not workaround the restriction.
 
-**First playable vertical slice:** Consumer requests allowlisted game → matched Provider → game launches → WebRTC stream + input → session ends cleanly.
+### M5 — Invite-only authorized beta
 
-### 11.2 Scope
+**Goal:** validate experience, supply reliability, and support burden with a small controlled cohort.
 
-**Orchestrator session API**
+**Scope:** invite flow, trusted Providers, support queue, session feedback, network preflight, quality dashboard, relay monitoring, manual risk review.
 
-- `POST /sessions` `{ game_id }`  
-- Match algorithm v0: first fit / random among capable idle Providers  
-- Session state machine  
-- Signaling relay endpoints (SDP/ICE exchange via orchestrator or dedicated signal service)  
-- TURN/STUN configuration distribution  
+**Exit:** at least 50 sessions meet the invite-beta gate, Provider availability is measured for four weeks, and the economics model uses observed—not assumed—inputs.
 
-**Stream host (C++ path)**
+### M6 — Restricted paid beta
 
-- Prefer integrate/adapt proven host (e.g. Sunshine-class architecture) before greenfield everything  
-- Hardware encode path (NVENC first)  
-- WebRTC send of video/audio  
-- Receive input channel  
+**Goal:** validate payment/Provider economics without public-marketplace scale.
 
-**Agent**
+**Scope:** payment-provider integration, ledger, refunds, payouts, fraud rules, terms acceptance, operational reconciliation.
 
-- On assign: reserve node → invoke stream host + launch profile → report `launching` / `live` / `failed`  
-- On end: stop stream host, stop game, basic cleanup, release node  
+**Exit:** finance-critical paths survive failure/retry scenarios without duplicate charge, unpaid usage, or unjustified payout.
 
-**Web client**
+### M7 — Scale only after repeatability
 
-- Login / API token  
-- Game picker (catalog)  
-- Session view: video element + input capture  
-- Basic stats overlay (optional): RTT, fps, bitrate  
+**Goal:** expand geography/cohort without hiding reliability debt.
 
-### 11.3 Quality targets (MVP, not production SLA)
+**Scope:** regional matching, TURN capacity, staged agent rollout, SLOs, backups, DDoS/rate-limit posture, incident drills, support operations.
 
-| Metric | MVP target |
-|--------|------------|
-| Same-region LAN / good network | Playable interactive feel |
-| Encode | 1080p30 or 1080p60 where GPU allows |
-| Start time | Game launch + stream &lt; ~60–120s depending on title |
-| Failure | Clear error if no Provider / launch fail |
+**Exit:** load-tested control plane, documented relay cost model, and error-budget/SLO ownership.
 
-### 11.4 Deliverables
+### M8 — Compute feasibility, separately approved
 
-- [ ] E2E demo script for ≥ 1 allowlisted title  
-- [ ] Session lifecycle persisted end-to-end  
-- [ ] P2P WebRTC success path documented; known NAT failure modes listed  
+**Goal:** decide whether untrusted batch compute deserves a new product line.
 
-### 11.5 Exit criteria
+**Scope:** isolated test jobs, artifact path, GPU allocation, sandbox escape testing, full threat model, separate pricing/legal review.
 
-Internal demo: Consumer in browser plays an allowlisted AAA title running on a remote Provider machine with keyboard/mouse (gamepad nice-to-have).
-
-### 11.6 Risks & mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| WebRTC NAT failure | STUN + managed TURN relay (accept bandwidth cost for reliability) |
-| Capture wrong window | Title regex + process attach; fallback fullscreen only if policy allows |
-| Long game boot | Pre-warm policies later; show “launching” UX honestly |
-| Greenfield C++ delay | Start from existing stream host; wrap with our agent |
+**Exit:** an untrusted test job cannot access host home data or undeclared network/filesystem resources. Failure ends or redesigns the compute path.
 
 ---
 
-## 12. Phase 4 — Hardening & security
+## 8. Engineering operating system
 
-### 12.1 Goal
+### 8.1 Repository and delivery standards
 
-Make the MVP **safe enough for non-employees** on trusted beta hardware.
+- component README, local runbook, `.env.example`, and no live secrets in source control;
+- pinned dependencies and lockfiles;
+- formatter/linter/type checking appropriate to each component;
+- unit tests for state transitions, authorization, idempotency, and policy parsing;
+- integration tests for agent enrollment/heartbeat/TTL and session reconciliation;
+- smoke test for the one current milestone; and
+- CI generates an SBOM and checks dependencies. OWASP highlights supply-chain risks, artifact integrity, and component inventory as ongoing concerns (**S4**).
 
-### 12.2 Scope
+### 8.2 Required ADRs
 
-**Gaming security**
+1. **ADR-001:** central control plane with decentralized media; trust boundaries.
+2. **ADR-002:** commercial title approval policy; account and rights rules.
+3. **ADR-003:** media-stack decision after M2 spike, including license analysis.
+4. **ADR-004:** node enrollment, credentials, command authorization, and revocation.
+5. **ADR-005:** P2P versus relay privacy/cost policy.
+6. **ADR-006:** payment/payout provider and ledger model before M6.
+7. **ADR-007:** whether compute proceeds after M8 feasibility.
 
-- Enforce window-only capture for support_tier ≥ supported  
-- Input sanitization v1: block dangerous OS chords; optional sticky-key traps  
-- Cursor/clip policy  
-- Disable Consumer access to Provider host shell  
+### 8.3 Definition of done for any milestone
 
-**Agent safety**
+A milestone is done only when:
 
-- GPU thermal / power cap → auto-end session + cooldown  
-- Max session duration  
-- Idle timeout  
-- Crash recovery: detect dead stream host / game; fail session  
-
-**Cleanup**
-
-- Session-end wipe checklist: temp dirs, optional secondary profiles, clipboard  
-- Report wipe success/failure to orchestrator  
-
-**Observability**
-
-- Structured logs (session_id correlation)  
-- Metrics: session success rate, time-to-live, disconnect reasons  
-- Alerts on agent crash loops  
-
-### 12.3 Deliverables
-
-- [ ] Security checklist signed off for closed beta  
-- [ ] Kill-switch policies configurable per node  
-- [ ] Runbook: compromised session / abusive Consumer  
-
-### 12.4 Exit criteria
-
-Security review of Provider attack surface (malicious Consumer) has documented residual risks and accepted mitigations.
+1. the stated exit evidence exists;
+2. failure/retry behavior is observable;
+3. a demo/smoke test exercises the changed path;
+4. sensitive data and secrets are handled according to policy;
+5. known risks are recorded with an owner and review date; and
+6. the next milestone’s prerequisite decision is explicit.
 
 ---
 
-## 13. Phase 5 — Closed beta marketplace
+## 9. Metrics dashboard
 
-### 13.1 Goal
+### 9.1 Product and quality
 
-Real multi-user marketplace behavior with limited supply/demand.
+- eligible-request rate;
+- request-to-first-frame percentiles;
+- reach-`live` rate and completion rate;
+- direct/relay ratio and relay bytes/session;
+- RTT/jitter/loss where available;
+- crash, cleanup, and re-match rates;
+- Consumer and Provider satisfaction; and
+- title/host/software-version correlation with failures.
 
-### 13.2 Scope
+### 9.2 Marketplace and economics
 
-**Product**
+- approved Providers, weekly host-hours, scheduled vs available capacity, utilization;
+- consumer activation and return rate;
+- Provider retention and maintenance burden;
+- gross transaction volume only after payments;
+- contribution margin per completed session; and
+- refund, dispute, fraud, and delayed-payout rate.
 
-- Consumer onboarding (invite-only)  
-- Provider onboarding (KYC-lite later; for beta: trusted Operators)  
-- Game catalog UX with support tiers  
-- Session history for both sides  
-- Basic ratings / “session quality” feedback  
+### 9.3 Security and operations
 
-**Matching v1**
+- agent enrollment/revocation events;
+- rejected command/policy violations;
+- high-temperature terminations;
+- security incident count and recovery time;
+- signed-release adoption, rollback rate, and dependency-alert remediation; and
+- backup restore and incident drill results.
 
-- Filters: VRAM, GPU tier, region/latency hint, price (if set), installed game  
-- Queue when no capacity  
-- Soft affinity: prefer lower RTT  
-
-**Reliability**
-
-- Automatic re-match on launch failure (1–2 attempts)  
-- Better ICE / TURN defaults  
-- Agent auto-update channel (signed)  
-
-### 13.3 Deliverables
-
-- [ ] Beta with N Providers and M Consumers (targets set at kickoff; e.g. 10 / 50)  
-- [ ] Weekly quality dashboard  
-- [ ] Title expansion process (add 5–15 more allowlisted games)  
-
-### 13.4 Exit criteria
-
-Unattended sessions complete successfully at an agreed success rate; Providers can leave agent running for days without manual babysitting.
+Metrics are privacy-minimized. Raw gameplay, keystrokes, credentials, and personal desktop content are not telemetry.
 
 ---
 
-## 14. Phase 6 — Metering & payments
+## 10. Decision log
 
-### 14.1 Goal
-
-Money follows usage without blocking core tech.
-
-### 14.2 Scope
-
-**Metering**
-
-- Billable seconds while `live`  
-- Optional quality adjustments later (not v1)  
-- Provider earnings ledger  
-
-**Payments MVP**
-
-- Consumer credits (Stripe or similar)  
-- Hold/capture per session or post-paid wallet debit  
-- Provider payout threshold + manual or automated payouts  
-- Dispute freeze flag on session  
-
-**Policy**
-
-- Minimum session charge  
-- Cancellation windows  
-- No-show Provider penalties (soft at first)  
-
-### 14.3 Deliverables
-
-- [ ] Ledger accurate vs session timestamps  
-- [ ] Consumer can buy credits and start a paid session  
-- [ ] Provider balance visible  
-
-### 14.4 Exit criteria
-
-Finance-critical path audited for double-charge and unpaid usage gaps.
-
-### 14.5 Explicitly out of scope (this phase)
-
-Complex auctions, dynamic surge pricing, crypto settlement.
+| Decision | Current choice | Revisit trigger |
+|---|---|---|
+| First commercial gaming path | Authorized titles only; internal demo otherwise | Written rights/counsel result |
+| First host class | Dedicated trusted/managed hardware | Proven isolation, insurance, and support model |
+| First client | Browser if M2 succeeds; native fallback allowed for technical evidence | Browser compatibility/quality result |
+| Media strategy | Evaluate/reuse; no greenfield engine | M2 ADR |
+| Networking | Relay-first public-beta posture; direct P2P requires privacy review | M2/M5 connection and cost evidence |
+| Control plane | Python + PostgreSQL | Measured operational constraint, not preference |
+| Agent | Python v0 with least privilege | Packaging/telemetry/security evidence |
+| Payments | After measured quality and legal gate | M5 economics and payment-provider approval |
+| Compute | Separate optional future lane | M8 isolation feasibility |
+| Blockchain | Out of scope | A demonstrated requirement, not hype |
 
 ---
 
-## 15. Phase 7 — Scale & reliability
+## 11. Research basis and source register
 
-### 15.1 Goal
+Research was reviewed on **2026-07-26**. Sources establish technical and contractual constraints; they are not legal advice.
 
-Survive growth beyond a single region and hobby NAT conditions.
-
-### 15.2 Scope
-
-**Networking**
-
-- Regional orchestrator or regional match groups  
-- TURN capacity planning  
-- Optional SFU later only if product requires (default remains P2P)  
-
-**QoS**
-
-- Adaptive bitrate  
-- Congestion feedback  
-- Client network pre-check before match  
-
-**Platform**
-
-- Multi-AZ orchestrator  
-- DB backups, migrations discipline  
-- Rate limits, WAF, DDoS posture  
-- Fraud: multi-account, session farming, chargebacks  
-
-**Agent fleet**
-
-- Gradual rollouts  
-- Crash telemetry  
-- Driver compatibility matrix  
-
-### 15.3 Deliverables
-
-- [ ] Capacity plan for 10× beta load  
-- [ ] SLO draft: session start success, disconnect rate  
-- [ ] Incident response runbook  
-
-### 15.4 Exit criteria
-
-Load-tested control plane; documented media cost model (especially TURN relay %).
+| ID | Source | Plan implication |
+|---|---|---|
+| **S1** | [Steam Subscriber Agreement](https://store.steampowered.com/subscriber_agreement/) | Steam grants personal, non-commercial use and restricts rental/licensing/hosting/commercial exploitation without permission. Commercial title availability requires a separate rights basis. |
+| **S2** | [WebRTC: peer connections](https://webrtc.org/getting-started/peer-connections) | Signaling is application-defined; ICE requires STUN/TURN candidate exchange; TURN is a normal commercial connectivity dependency. |
+| **S3** | [Sunshine documentation](https://docs.lizardbyte.dev/projects/sunshine/latest/) and [Sunshine license](https://github.com/LizardByte/Sunshine/blob/master/LICENSE) | Sunshine is an evaluated host candidate, not a presumed browser-WebRTC solution; GPLv3 obligations require review before integration/distribution. |
+| **S4** | [OWASP Threat Modeling](https://owasp.org/www-community/Threat_Modeling) and [OWASP Software Supply Chain guidance](https://cheatsheetseries.owasp.org/cheatsheets/Software_Supply_Chain_Security_Cheat_Sheet.html) | Trust boundaries, signed artifacts, dependency inventory, and staged updates are roadmap requirements. |
+| **S5** | [Stripe Connect documentation](https://docs.stripe.com/connect) | Marketplace charges, connected-account onboarding, transfers, and payouts are a specialist payment workflow; do not build them from scratch. |
+| **S6** | [Microsoft AppContainer isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation) and [Windows Sandbox](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-overview) | Windows isolation options exist but game/anti-cheat compatibility is not assumed; dedicated hosts remain the initial safety baseline. |
 
 ---
 
-## 16. Phase 8 — General Compute vertical
+## 12. Immediate next actions
 
-### 16.1 Goal
-
-Reuse the spine for **task-based work** without breaking gaming.
-
-### 16.2 Scope
-
-**New domain: Job**
-
-- Submit job (image, command, input artifacts, GPU requirements)  
-- Match Provider with free GPU/CPU  
-- Agent pulls inputs over TLS  
-- Run inside **Docker** with resource limits  
-- Stream logs (optional)  
-- Upload outputs  
-- Wipe workspace  
-- Meter by GPU-seconds / wall time  
-
-**Agent extensions**
-
-- Docker runtime dependency  
-- GPU device mapping policy  
-- Concurrent gaming vs compute scheduling rules (default: mutual exclusion on same GPU)  
-
-**Orchestrator**
-
-- Job state machine parallel to Session  
-- Artifact storage (S3) for inputs/outputs  
-- Separate pricing  
-
-### 16.3 Deliverables
-
-- [ ] Demo jobs: e.g. Blender still, ffmpeg transcode, small CUDA sample  
-- [ ] Hard fail if container escapes mounts (test suite)  
-- [ ] Wipe verification tests  
-
-### 16.4 Exit criteria
-
-Untrusted sample job cannot read host home directory; outputs only via declared artifact path.
-
-### 16.5 Why after gaming
-
-Compute needs the same node identity, heartbeat, matching, metering, and trust systems — already proven under Session pressure.
+1. Keep the current M0 scope: local database, orchestrator health, agent health ping, repository hygiene.
+2. Create ADR-001 and ADR-002 before adding remote launch capability.
+3. Define the beachhead record in Section 2.2; leave unknowns explicit rather than inventing them.
+4. Build M1 node enrollment/heartbeat only after M0 is demonstrably complete.
+5. Plan M2 as a bounded media feasibility spike with a test application or rights-cleared title.
+6. Contact qualified counsel/rightsholders before describing any commercial gaming catalog or accepting payment.
+7. Do not begin general compute, public Provider onboarding, or payments while a preceding gate is unresolved.
 
 ---
 
-## 17. Phase 9 — Growth, GTA 6 PC readiness & partnerships
+## One-line strategy
 
-### 17.1 Goal
-
-Convert cultural moments and publisher relationships into supply/demand.
-
-### 17.2 Scope
-
-**GTM**
-
-- Position as multi-title P2P cloud gaming (not a single-game client)  
-- Waitlist and Provider recruitment around major PC releases  
-- Content: “play on any laptop; hardware stays yours as Provider”  
-
-**GTA 6 PC (when available)**
-
-- Legal review against Rockstar / platform ToS  
-- Technical profile: launch, anti-cheat, capture, performance tier  
-- Catalog entry only if `legal_status` allows  
-- Capacity planning: expect demand spike; may need Provider incentives  
-
-**Partnerships**
-
-- Store / publisher conversations for cloud-allowed titles  
-- OEM or café Provider fleets (optional)  
-
-**Clients**
-
-- Native Windows client (better input/gamepad)  
-- Android / iOS thin clients if latency acceptable  
-
-### 17.3 Deliverables
-
-- [ ] Public marketing site aligned with legal claims  
-- [ ] Title onboarding playbook for “mega-release” weeks  
-- [ ] Partnership one-pager  
-
-### 17.4 Exit criteria
-
-Playbook exists to add a major new AAA title in days (QA + config), not months (re-architecture).
-
----
-
-## 18. Phase 10 — Platform maturity
-
-### 18.1 Goal
-
-Operate as durable infrastructure, not a prototype network.
-
-### 18.2 Scope
-
-- Advanced scheduling (preemption, reservations, Provider calendars)  
-- Reputation, insurance-like Provider guarantees  
-- Enterprise / studio bulk compute & private Provider pools  
-- Stronger sandboxing (gVisor/Firecracker research for compute)  
-- Multi-cloud orchestrator DR  
-- Compliance reviews (payments, data retention, regional law)  
-- Open Provider economics dashboard  
-
-### 18.3 Exit criteria
-
-Defined SLOs with error budgets; on-call rotation; financial reconciliation automation.
-
----
-
-## 19. Cross-cutting workstreams (all phases)
-
-| Workstream | Activities |
-|------------|------------|
-| **Legal** | Title reviews, ToS of Steam/Epic/Rockstar, privacy policy, Provider agreement |
-| **Security** | Threat models (malicious Consumer, malicious Provider, malicious job) |
-| **QA** | Per-title launch/capture matrix; regression before catalog publish |
-| **Design/UX** | Session UX, Provider dashboard, error honesty |
-| **Data** | Metrics taxonomy; privacy-minimized telemetry |
-| **Support** | Runbooks, status page (later), dispute process |
-
----
-
-## 20. Suggested milestone timeline (indicative)
-
-> Adjust to team size. Assumes small founding team (2–4 eng) focused full-time.
-
-| Milestone | Approx. window | Phase mapping |
-|-----------|----------------|---------------|
-| M0 Repo + contracts live | Weeks 1–2 | Phase 0 |
-| M1 Agent online in orchestrator | Weeks 2–4 | Phase 1 |
-| M2 Catalog + Steam detect + match query | Weeks 4–6 | Phase 2 |
-| M3 First playable E2E stream | Weeks 6–12 | Phase 3 |
-| M4 Security hardening for external beta | Weeks 12–16 | Phase 4 |
-| M5 Closed beta running | Weeks 16–24 | Phase 5 |
-| M6 Paid sessions MVP | Weeks 24–32 | Phase 6 |
-| M7 Scale pass + multi-region story | Months 8–12 | Phase 7 |
-| M8 Compute vertical MVP | Months 10–14 | Phase 8 |
-| M9 Growth / major-title readiness | Ongoing from beta | Phase 9 |
-| M10 Maturity | Year 2+ | Phase 10 |
-
-Streaming MVP duration is the highest variance item (media stack integration).
-
----
-
-## 21. Team focus by phase (founding stage)
-
-| Phase | Who leans in |
-|-------|----------------|
-| 0–2 | Full-stack / backend heavy |
-| 3–4 | Systems + media (C++/WebRTC) + backend |
-| 5–6 | Product UX + backend + ops |
-| 7 | Infra / SRE mindset |
-| 8 | Containers + backend |
-| 9 | BD / legal / growth + eng support |
-| 10 | Entire org |
-
-Hire priority after founders: **media/streaming engineer**, then **infra**, then **growth eng**.
-
----
-
-## 22. Success metrics
-
-### 22.1 Product (Gaming)
-
-- Session start success rate  
-- Median time-to-first-frame  
-- Median RTT / gameplay subjective score  
-- % sessions using P2P vs TURN  
-- Catalog size × % sessions per title  
-
-### 22.2 Marketplace
-
-- Active Providers (7-day)  
-- Supply hours online  
-- Utilization %  
-- Consumer retention D1/D7  
-- Take rate and gross marketplace volume (post payments)  
-
-### 22.3 Safety
-
-- Provider-reported incidents  
-- Wipe failure rate  
-- Thermal kill events  
-- Chargebacks / disputes  
-
-### 22.4 Compute (later)
-
-- Job success rate  
-- Queue wait time  
-- GPU-hour volume  
-
----
-
-## 23. Risk register (top)
-
-| Risk | Impact | Likelihood | Mitigation |
-|------|--------|------------|------------|
-| Underestimate WebRTC/NAT difficulty | High | High | TURN early; reuse mature stream host |
-| Publisher ToS blocks key titles | High | Medium | Allowlist honesty; pursue partners; multi-title portfolio |
-| Anti-cheat bans streaming setups | High | Medium | Prefer single-player first; status=limited |
-| GTA 6 PC later than expected | Medium | High | Don’t couple launch to one title |
-| Malicious Consumers abuse Providers | High | Medium | Capture/input policy, sessions caps, reputation |
-| Malicious Providers abuse Consumers | High | Medium | Encryption, wipe, reputation, optional attestation later |
-| All-C++ rewrite temptation | Medium | Medium | Enforce hybrid stack ADRs |
-| TURN bandwidth costs | Medium | High | Prefer P2P; price relay; regional matching |
-| Provider supply cold start | High | High | Seed Providers (founders, friends, cafés, incentives) |
-
----
-
-## 24. Decision log (locked for this plan)
-
-| Decision | Choice |
-|----------|--------|
-| Architecture | Pragmatic hybrid (central orchestrator + decentralized execution) |
-| First vertical | Cloud gaming |
-| Game support | Multi-title, legally constrained allowlist (BYOL) |
-| Second vertical | General Compute (Docker), after gaming spine |
-| Orchestrator language | Python + PostgreSQL + AWS |
-| Agent control plane | Python first |
-| Media plane | C++ / proven C++-backed stream host |
-| Consumer v0 client | Browser WebRTC |
-| Payments | After playable beta (Phase 6) |
-| Blockchain | Not required for v0–v1 |
-
----
-
-## 25. Immediate next actions (start of Phase 0)
-
-1. Create monorepo structure (`orchestrator`, `agent`, `stream-host`, `catalog`, `clients/web`, `docs`, `infra`).  
-2. Write ADR-001 (hybrid architecture) and ADR-002 (BYOL allowlist).  
-3. Draft OpenAPI for: auth, providers, heartbeats, games, sessions.  
-4. Stand up local Postgres + orchestrator health + agent heartbeat proof.  
-5. Pick initial **3–5** allowlisted AAA titles for Phase 2–3 QA.  
-6. Spike stream-host options (build vs integrate) with a 1-week timebox; decide before Phase 3 deep work.  
-
----
-
-## 26. Document maintenance
-
-- Update this `plan.md` when a phase exit criterion changes or a locked decision flips.  
-- Prefer **ADRs** for architectural decisions; keep this file as the roadmap narrative.  
-- Phase exit checkboxes can move to GitHub Projects / Linear; keep definitions of done here.  
-
----
-
-## 27. One-line summary
-
-**Build a multi-title, legally allowlisted P2P cloud gaming marketplace on a hybrid control/media plane; harden it into a paid beta; then extend the same spine to Dockerized general compute — without betting the company on a single unreleased game or an all-C++ rewrite.**
+**Prove a safe, measured remote interactive session on dedicated trusted hardware; commercialize only where title rights, host protection, network privacy, support capacity, and contribution margin are evidenced—not assumed.**
