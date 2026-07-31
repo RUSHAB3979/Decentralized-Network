@@ -1,41 +1,64 @@
-# P2P Cloud Gaming & Compute Marketplace
+# P2P Compute Marketplace MVP
 
-Decentralized marketplace for computing resources — matching idle GPU Providers with Consumers for low-latency cloud gaming and high-throughput batch compute.
+This repository is a dual-track decentralized marketplace baseline:
 
-## Project Structure
+- **Cloud Gaming** (low-latency stream sessions)
+- **General Compute** (secure batch jobs)
 
-- `orchestrator/` — Central control plane API (FastAPI) handling matching, catalog, and auth.
-- `agent/` — Provider Agent daemon running on GPU host nodes.
-- `docs/` — Specifications, architectural decision records (ADRs), and task breakdown (`docs/Tasks/tasks.md`).
+The current implementation is intentionally minimal and optimized for proving the core matching and job lifecycle loop before persistence, queueing, and security hardening.
 
-## Quick Start (Milestone M0)
+## Documentation Index
 
-### 1. Prerequisites
-- Python 3.11+
-- Docker Desktop (for local Postgres DB)
+- `docs/PLAN.md`: Product and engineering plan with phased milestones and exit criteria
+- `docs/ARCHITECTURE.md`: System architecture, component boundaries, and sequence flows
+- `docs/API.md`: Endpoint reference, request/response examples, and validation behavior
+- `docs/OPERATIONS.md`: Local/dev runbook, Docker usage, environment variables, and security checklist
+- `docs/LEGAL-STARTER-INDIA.md`: Founder-first legal document template and India compliance map
+- `docs/LEGAL-SECURITY-REQUIREMENTS-INDIA.md`: Professional legal-security control framework for launch readiness
+- `docs/api-smoke-test.http`: Quick HTTP requests for manual API smoke testing
 
-### 2. Start PostgreSQL Database
-```powershell
-docker compose up -d
+## Monorepo Layout
+
+- `services/orchestrator`: Control plane API (provider registry, matching, compute job lifecycle)
+- `services/provider-agent`: Provider daemon that emits periodic heartbeats
+- `packages/contracts`: Shared Zod schemas and TypeScript types for contracts
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 20+
+
+### Local Run
+
+1. Install dependencies:
+   - `npm install`
+2. Run orchestrator:
+   - `npm run dev:orchestrator`
+3. In a second terminal, run provider agent:
+   - `npm run dev:agent`
+4. Smoke test:
+   - Use `docs/api-smoke-test.http` (or `curl`) against `http://localhost:8080`
+
+### Docker Compose Run
+
+```bash
+docker compose up
 ```
 
-### 3. Run the Orchestrator
-```powershell
-cd orchestrator
-# Set up venv if not already done
-python -m venv env
-.\env\Scripts\activate
-pip install -r requirements.txt
+This starts both `orchestrator` and `provider-agent` with default environment values.
 
-# Run server
-python main.py
-```
-Orchestrator health check will be available at `http://localhost:8000/health`.
+## Current MVP Scope (Implemented)
 
-### 4. Run the Provider Agent Ping
-```powershell
-cd agent
-# In a separate terminal
-python main.py
-```
-The agent reads `ORCHESTRATOR_URL` from `.env`, pings the orchestrator's `/health` endpoint, and logs the result.
+- In-memory provider registry with TTL-based activity filtering
+- Provider heartbeat ingestion with contract validation
+- Gaming and compute provider matching endpoints
+- Compute job submit and status endpoints
+- Simulated provider telemetry loop from provider agent
+
+## Near-Term Priorities
+
+1. Replace in-memory maps with persistent storage
+2. Introduce queue-backed job scheduling and retries
+3. Add authn/authz and provider trust controls
+4. Add workload sandboxing and secure execution path
