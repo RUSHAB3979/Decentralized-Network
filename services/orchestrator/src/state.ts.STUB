@@ -1,0 +1,20 @@
+export class ProviderRegistry {
+  private providers = new Map<string, ProviderRecord>();
+
+  upsert(providerId: string, record: ProviderRecord): void { this.providers.set(providerId, record); }
+  getActive(ttlMs: number, now = Date.now()): ProviderRecord[] {
+    return [...this.providers.values()].filter((p) => now - p.lastSeenEpochMs <= ttlMs);
+  }
+}
+
+export class JobStore {
+  private jobs = new Map<string, ComputeJobRecord>();
+  private nextId = 1;
+
+  create(request: ComputeJobSubmit): ComputeJobRecord {
+    const job: ComputeJobRecord = { id: `job_${this.nextId++}`, ...request, ... };
+    this.jobs.set(job.id, job); return job;
+  }
+  get(id: string) { return this.jobs.get(id); }
+  setStatus(id: string, status: JobStatus, providerId?: string): void { ... }
+}

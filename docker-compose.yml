@@ -16,3 +16,27 @@ services:
 volumes:
   pgdata:
   
+version: "3.9"
+
+services:
+  orchestrator:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "npm install && npm run dev:orchestrator"
+    ports:
+      - "8080:8080"
+
+  provider-agent:
+    image: node:20
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "npm install && npm run dev:agent"
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8080
+      PROVIDER_ID: provider-docker-1
+      REGION: us-east-1
+    depends_on:
+      - orchestrator

@@ -51,3 +51,9 @@ venv.bak/
 # Database & Data
 *.sqlite3
 pgdata/
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+coverage/

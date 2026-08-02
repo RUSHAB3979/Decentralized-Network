@@ -1,0 +1,41 @@
+### Health
+GET http://localhost:8080/health
+
+### Gaming Match
+POST http://localhost:8080/v1/match/gaming
+content-type: application/json
+
+{
+  "requesterId": "req-1",
+  "region": "us-east-1",
+  "maxLatencyMs": 80
+}
+
+### Compute Match
+POST http://localhost:8080/v1/match/compute
+content-type: application/json
+
+{
+  "requesterId": "req-2",
+  "region": "us-east-1",
+  "minCpuCores": 8,
+  "minRamGb": 16,
+  "requireGpu": true,
+  "minGpuVramGb": 8
+}
+
+### Submit Compute Job
+POST http://localhost:8080/v1/jobs
+content-type: application/json
+
+{
+  "requesterId": "req-3",
+  "imageRef": "ghcr.io/acme/render:latest",
+  "command": ["blender", "-b", "scene.blend", "-f", "1"],
+  "region": "us-east-1",
+  "minCpuCores": 8,
+  "minRamGb": 16,
+  "requireGpu": true,
+  "minGpuVramGb": 8,
+  "timeoutSec": 3600
+}

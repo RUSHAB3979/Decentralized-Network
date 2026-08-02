@@ -1,0 +1,19 @@
+{
+  "name": "p2p-compute-marketplace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dual-track MVP: cloud gaming + batch compute marketplace",
+  "workspaces": [
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:orchestrator": "npm run dev -w @market/orchestrator",
+    "dev:agent": "npm run dev -w @market/provider-agent",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
