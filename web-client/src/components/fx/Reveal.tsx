@@ -15,17 +15,22 @@ const Reveal: React.FC<RevealProps> = ({ children, className = '', delay = 0, as
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const timer = setTimeout(() => setVisible(true), 500);
     const io = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
           setVisible(true);
+          clearTimeout(timer);
           io.disconnect();
         }
       },
-      { threshold: 0.15 },
+      { threshold: 0.01 },
     );
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      clearTimeout(timer);
+      io.disconnect();
+    };
   }, []);
 
   const Tag = as as React.ElementType;
