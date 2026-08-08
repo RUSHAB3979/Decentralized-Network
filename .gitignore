@@ -1,4 +1,13 @@
-# Python
+# =============================================================
+# Git Ignore — P2P Compute Marketplace
+# =============================================================
+
+# --- Node.js / TypeScript ---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -21,21 +30,25 @@ share/python-wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Virtual environments (any depth)
 venv/
 .venv/
 env/
 ENV/
 env.bak/
 venv.bak/
+**/env/
+*env/
 
-# Environment files
+# --- Environment & Secrets ---
 .env
 .env.*
 *.env
 !.env.example
+*.pem
+*.key
 
-# IDEs & Editors
+# --- IDEs & Editors ---
 .vscode/
 .idea/
 *.swp
@@ -48,12 +61,18 @@ venv.bak/
 *.sln
 *.sw?
 
-# Database & Data
-*.sqlite3
-pgdata/
-node_modules/
-dist/
-.env
-.DS_Store
+# --- Build & Cache ---
+.cache/
 *.log
 coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Database & Data ---
+*.sqlite3
+pgdata/
+*.db
+
+# --- OS ---
+Thumbs.db
