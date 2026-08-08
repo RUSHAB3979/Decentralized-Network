@@ -1,0 +1,26 @@
+{
+  "name": "@market/context-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Startup context server: GraphQL API + MCP bridge exposing Decentralized-Network knowledge to OMP, Claude, ChatGPT, Gemini, Cursor, Copilot",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "mcp": "tsx src/mcp.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@graphql-tools/schema": "^10.0.16",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "graphql": "^16.9.0",
+    "graphql-yoga": "^5.10.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

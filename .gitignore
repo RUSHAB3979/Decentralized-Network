@@ -68,6 +68,11 @@ coverage/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+**/.gocache/
+
+# MCP logs/transient
+.mcp-cache/
+__mcp__/
 
 # --- Database & Data ---
 *.sqlite3
