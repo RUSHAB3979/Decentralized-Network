@@ -2,7 +2,7 @@ import type {
   ComputeMatchRequest,
   GamingMatchRequest,
   ProviderHeartbeat
-} from "../../../packages/contracts/src/index.js";
+} from "@market/contracts";
 import type { ProviderRecord } from "./state.js";
 
 function scoreGaming(p: ProviderHeartbeat, req: GamingMatchRequest): number {

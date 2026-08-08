@@ -1,4 +1,4 @@
-import { ProviderHeartbeatSchema } from "../../../packages/contracts/src/index.js";
+import { ProviderHeartbeatSchema } from "@market/contracts";
 import { config } from "./config.js";
 
 function bounded(base: number, delta: number, min = 0, max = 100): number {

@@ -4,7 +4,7 @@ import {
   ComputeMatchRequestSchema,
   GamingMatchRequestSchema,
   ProviderHeartbeatSchema
-} from "../../../packages/contracts/src/index.js";
+} from "@market/contracts";
 import { config } from "./config.js";
 import { selectComputeProvider, selectGamingProvider } from "./matching.js";
 import { jobs, providers } from "./state.js";

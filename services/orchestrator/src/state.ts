@@ -1,7 +1,7 @@
 import type {
   ComputeJobSubmit,
   ProviderHeartbeat
-} from "../../../packages/contracts/src/index.js";
+} from "@market/contracts";
 
 export interface ProviderRecord extends ProviderHeartbeat {
   lastSeenEpochMs: number;
