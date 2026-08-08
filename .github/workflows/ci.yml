@@ -234,16 +234,10 @@ jobs:
           fetch-depth: 0  # Full history needed for secrets scan
 
       - name: Gitleaks — scan for secrets in git history
-        # Using the maintained CLI instead of the archived gitleaks-action.
-        # TODO(security): flip to blocking once `git filter-repo` has purged
-        # `.env` and the old docker-compose hardcoded password from history
-        # (and the Postgres password has been rotated).
+        # Official GitHub Container Registry image. Report-only until the
+        # .env / hardcoded password is purged from history and rotated.
         continue-on-error: true
-        run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz | tar -xz
-          ./gitleaks git --verbose . --report-format json --report-path gitleaks-report.json || true
-          echo "--- Leaks found (see report) ---"
-          cat gitleaks-report.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin) if sys.stdin else []; print(f'{len(d)} potential secret(s) in history')" || echo "0 secrets"
+        run: docker run --rm -v ${{ github.workspace }}:/repo zricethezav/gitleaks:latest git /repo --verbose --report-format json --report-path /repo/gitleaks-report.json || true
 
       - name: Upload gitleaks report
         if: always()
@@ -259,18 +253,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: npm audit (entire workspace)
-        continue-on-error: true  # report-only during early phase
         run: |
           npm ci --ignore-scripts
           npm audit --audit-level=high --workspaces --include-workspace-root || true
+          echo "npm audit reported (non-blocking during early phase)"
 
       - name: npm audit — web-client
-        continue-on-error: true
-        run: cd web-client && npm ci && npm audit --audit-level=high || true
+        run: cd web-client && npm ci && (npm audit --audit-level=high || true)
 
       - name: Trivy — scan for vulnerabilities
+        id: trivy
         uses: aquasecurity/trivy-action@master
-        continue-on-error: true  # Report only during early phase; flip to blocking later
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -279,8 +272,9 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Upload Trivy results to GitHub Security
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true
+        continue-on-error: true  # No findings = empty SARIF = upload may noop without hard-failing
         with:
           sarif_file: 'trivy-results.sarif'
 
@@ -318,23 +312,49 @@ jobs:
   all-checks:
     name: 🟢 All checks passed
     runs-on: ubuntu-latest
-    needs: [contracts, orchestrator, provider-agent, web, python, docker, security]
     if: always()
+    needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom]
     steps:
-      - name: Check required jobs passed
+      - name: Report results
         run: |
-          # List of jobs that are allowed to be "skipped" when not triggered
-          PASSED=0
-          FAILED=0
-          for JOB in contracts orchestrator provider-agent web python docker security; do
-            RESULT=$(echo "${{ toJSON(needs) }}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('$JOB',{}).get('result','skipped'))")
-            echo "$JOB: $RESULT"
-            if [ "$RESULT" = "failure" ] || [ "$RESULT" = "cancelled" ]; then
-              FAILED=1
+          echo "changes=${{ needs.changes.result }}"
+          echo "contracts=${{ needs.contracts.result }}"
+          echo "orchestrator=${{ needs.orchestrator.result }}"
+          echo "provider-agent=${{ needs.provider-agent.result }}"
+          echo "web=${{ needs.web.result }}"
+          echo "python=${{ needs.python.result }}"
+          echo "docker=${{ needs.docker.result }}"
+          echo "security=${{ needs.security.result }}"
+          echo "sbom=${{ needs.sbom.result }}"
+
+      - name: Fail if any required job failed or was cancelled
+        run: |
+          JOBS="changes contracts orchestrator provider-agent web python docker security sbom"
+          FAIL=0
+          declare -A RESULTS=(
+            [changes]="${{ needs.changes.result }}"
+            [contracts]="${{ needs.contracts.result }}"
+            [orchestrator]="${{ needs.orchestrator.result }}"
+            [provider-agent]="${{ needs.provider-agent.result }}"
+            [web]="${{ needs.web.result }}"
+            [python]="${{ needs.python.result }}"
+            [docker]="${{ needs.docker.result }}"
+            [security]="${{ needs.security.result }}"
+            [sbom]="${{ needs.sbom.result }}"
+          )
+          for JOB in $JOBS; do
+            R="${RESULTS[$JOB]}"
+            if [ "$R" = "failure" ] || [ "$R" = "cancelled" ]; then
+              echo "❌ $JOB: $R"
+              FAIL=1
+            elif [ "$R" = "skipped" ]; then
+              echo "⏭️  $JOB: skipped (not triggered by path filter)"
+            else
+              echo "✅ $JOB: $R"
             fi
           done
-          if [ $FAILED -eq 1 ]; then
-            echo "❌ One or more required checks failed"
+          if [ $FAIL -eq 1 ]; then
+            echo "One or more required checks failed."
             exit 1
           fi
           echo "✅ All checks passed"
