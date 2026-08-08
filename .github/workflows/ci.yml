@@ -56,6 +56,7 @@ jobs:
               - 'tsconfig.base.json'
             web:
               - 'web-client/**'
+              - '.github/workflows/**'
             python:
               - 'blender_pvp/**'
               - 'orchestrator/**'
@@ -160,10 +161,10 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------
-  # 5. WEB CLIENT — React + Vite + Tailwind
+  # 5. WEB CLIENT — JavaScript + React + Vite + Tailwind
   # ---------------------------------------------------------------
   web:
-    name: Web Client — typecheck + build
+    name: Web Client — build
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.web == 'true'
@@ -179,8 +180,6 @@ jobs:
           cache-dependency-path: web-client/package-lock.json
       - name: Install
         run: npm ci
-      - name: Typecheck
-        run: npx tsc --noEmit
       - name: Build
         run: npm run build
 
