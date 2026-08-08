@@ -109,6 +109,22 @@
     @apply font-semibold;
     font-variant-numeric: tabular-nums;
   }
+
+  .auth-social {
+    @apply flex items-center justify-center gap-2.5 rounded-xl border border-white/[0.09] bg-white/[0.025] py-3 text-xs font-medium text-slate-300 transition-all hover:border-white/[0.18] hover:bg-white/[0.055] hover:text-white active:scale-[0.98];
+  }
+
+  .auth-field > span {
+    @apply mb-2 block text-[10px] font-medium uppercase tracking-[0.17em] text-slate-500;
+  }
+
+  .auth-field > div {
+    @apply flex items-center gap-3 rounded-xl border border-white/[0.09] bg-black/20 px-4 text-slate-500 transition-all focus-within:border-indigo-300/40 focus-within:bg-indigo-300/[0.025] focus-within:text-indigo-300;
+  }
+
+  .auth-field input {
+    @apply min-w-0 flex-1 bg-transparent py-3.5 text-sm text-slate-100 outline-none placeholder:text-slate-700;
+  }
 }
 
 @keyframes iridescent-pan {
