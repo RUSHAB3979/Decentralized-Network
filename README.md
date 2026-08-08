@@ -9,6 +9,7 @@ The current implementation is intentionally minimal and optimized for proving th
 
 ## Documentation Index
 
+- `docs/UNIFIED-GPU-MARKETPLACE-PLAN.md`: Master plan for render/media jobs, hosted model APIs, GPU workstations, and cloud gaming
 - `docs/PLAN.md`: Product and engineering plan with phased milestones and exit criteria
 - `docs/ARCHITECTURE.md`: System architecture, component boundaries, and sequence flows
 - `docs/API.md`: Endpoint reference, request/response examples, and validation behavior

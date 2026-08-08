@@ -1,5 +1,7 @@
 # Product + Engineering Plan
 
+> **Strategic expansion:** This document describes the current dual-track MVP baseline. The master direction for the broader GPU marketplace—batch rendering/media, hosted open-source-model APIs, interactive GPU workstations, and cloud gaming—is defined in [UNIFIED-GPU-MARKETPLACE-PLAN.md](UNIFIED-GPU-MARKETPLACE-PLAN.md).
+
 ## 1. Vision
 
 Build a decentralized marketplace that routes workloads to suitable provider machines across two tracks:
