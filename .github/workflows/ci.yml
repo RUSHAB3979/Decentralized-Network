@@ -31,7 +31,7 @@ jobs:
       python: ${{ steps.filter.outputs.python }}
       docker: ${{ steps.filter.outputs.docker }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -71,7 +71,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -95,7 +95,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -125,7 +125,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agent == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -158,7 +158,7 @@ jobs:
       run:
         working-directory: web-client
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -180,7 +180,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -209,7 +209,7 @@ jobs:
       PROVIDER_ID: ci-provider
       ORCHESTRATOR_URL: http://orchestrator:8080
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate docker-compose (full render + schema check)
         run: docker compose config --quiet
       - name: Build compose services
@@ -227,9 +227,11 @@ jobs:
     name: Security — secrets + vuln scanning
     runs-on: ubuntu-latest
     permissions:
+      contents: read          # REQUIRED: declaring any permissions block sets all others to 'none';
+                              # without this, checkout gets a tokenless fetch -> "repository not found"
       security-events: write  # For SARIF upload
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # Full history needed for secrets scan
 
@@ -287,7 +289,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true' || needs.changes.outputs.agent == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
