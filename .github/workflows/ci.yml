@@ -101,7 +101,7 @@ jobs:
   orchestrator:
     name: Orchestrator — typecheck + build
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, contracts]
     if: needs.changes.outputs.orchestrator == 'true'
     steps:
       - uses: actions/checkout@v5
@@ -111,6 +111,8 @@ jobs:
           cache: 'npm'
       - name: Install workspace deps
         run: npm ci --ignore-scripts
+      - name: Build contracts dependency
+        run: npm run build -w @market/contracts
       - name: Typecheck orchestrator
         working-directory: services/orchestrator
         run: npm run typecheck
@@ -131,7 +133,7 @@ jobs:
   provider-agent:
     name: Provider Agent — typecheck + build
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, contracts]
     if: needs.changes.outputs.agent == 'true'
     steps:
       - uses: actions/checkout@v5
@@ -141,6 +143,8 @@ jobs:
           cache: 'npm'
       - name: Install workspace deps
         run: npm ci --ignore-scripts
+      - name: Build contracts dependency
+        run: npm run build -w @market/contracts
       - name: Typecheck agent
         working-directory: services/provider-agent
         run: npm run typecheck
@@ -207,7 +211,7 @@ jobs:
   context-server:
     name: Context Server — typecheck + build
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, contracts]
     if: needs.changes.outputs.context == 'true'
     steps:
       - uses: actions/checkout@v5
@@ -216,6 +220,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install workspace deps
         run: npm ci --ignore-scripts
+      - name: Build contracts dependency
+        run: npm run build -w @market/contracts
       - name: Typecheck
         working-directory: services/context-server
         run: npm run typecheck
