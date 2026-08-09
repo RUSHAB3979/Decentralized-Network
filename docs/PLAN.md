@@ -2,7 +2,7 @@
 
 > **Strategic expansion:** This document describes the current dual-track MVP baseline. The master direction for the broader GPU marketplace—batch rendering/media, hosted open-source-model APIs, interactive GPU workstations, and cloud gaming—is defined in [UNIFIED-GPU-MARKETPLACE-PLAN.md](UNIFIED-GPU-MARKETPLACE-PLAN.md).
 
-> **Backend language direction:** The core control plane and provider agent will migrate to Python/Flask through contract parity rather than a destructive rewrite. See [PYTHON-FLASK-BACKEND-MIGRATION.md](PYTHON-FLASK-BACKEND-MIGRATION.md). Persistence, auth, queues, and billing must not be mixed into the language migration.
+> **Backend language direction:** The core control plane and provider agent will migrate to Python/FastAPI through contract parity rather than a destructive rewrite. See [PYTHON-FASTAPI-BACKEND-MIGRATION.md](PYTHON-FASTAPI-BACKEND-MIGRATION.md). Persistence, auth, queues, and billing must not be mixed into the language migration.
 
 ## 1. Vision
 

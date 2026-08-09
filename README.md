@@ -10,7 +10,7 @@ The current implementation is intentionally minimal and optimized for proving th
 ## Documentation Index
 
 - `docs/UNIFIED-GPU-MARKETPLACE-PLAN.md`: Master plan for render/media jobs, hosted model APIs, GPU workstations, and cloud gaming
-- `docs/PYTHON-FLASK-BACKEND-MIGRATION.md`: Contract-first plan for moving the core runtime from TypeScript/Express to Python/Flask
+- `docs/PYTHON-FASTAPI-BACKEND-MIGRATION.md`: Contract-first plan for moving the core runtime from TypeScript/Express to Python/FastAPI
 - `docs/PLAN.md`: Product and engineering plan with phased milestones and exit criteria
 - `docs/ARCHITECTURE.md`: System architecture, component boundaries, and sequence flows
 - `docs/API.md`: Endpoint reference, request/response examples, and validation behavior
@@ -27,7 +27,7 @@ The current implementation is intentionally minimal and optimized for proving th
 
 ### Backend Language Direction
 
-The current core runtime remains the TypeScript baseline until parity tests pass. New core-backend development is planned in Python using Flask, Pydantic, and pytest. The React/Vite frontend and the separate GraphQL/MCP context server can remain JavaScript/TypeScript. See `docs/PYTHON-FLASK-BACKEND-MIGRATION.md` before changing or removing the current services.
+The current core runtime remains the TypeScript baseline until parity tests pass. New core-backend development is planned in Python using FastAPI, Pydantic, and pytest. The React/Vite frontend and the separate GraphQL/MCP context server can remain JavaScript/TypeScript. See `docs/PYTHON-FASTAPI-BACKEND-MIGRATION.md` before changing or removing the current services.
 
 ## Quick Start
 
