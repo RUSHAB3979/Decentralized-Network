@@ -279,10 +279,9 @@ jobs:
           fetch-depth: 0  # Full history needed for secrets scan
 
       - name: Gitleaks — scan for secrets in git history
-        # Official GitHub Container Registry image. Report-only until the
-        # .env / hardcoded password is purged from history and rotated.
-        continue-on-error: true
-        run: docker run --rm -v ${{ github.workspace }}:/repo zricethezav/gitleaks:latest git /repo --verbose --report-format json --report-path /repo/gitleaks-report.json || true
+        # Pin the scanner release and fail closed. --redact prevents a detected
+        # secret from being copied into CI logs or the uploaded report.
+        run: docker run --rm -v ${{ github.workspace }}:/repo zricethezav/gitleaks:v8.30.1 git /repo --verbose --redact --report-format json --report-path /repo/gitleaks-report.json
 
       - name: Upload gitleaks report
         if: always()
@@ -297,24 +296,24 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: npm audit (entire workspace)
+      - name: npm audit — production dependencies
         run: |
           npm ci --ignore-scripts
-          npm audit --audit-level=high --workspaces --include-workspace-root || true
-          echo "npm audit reported (non-blocking during early phase)"
+          npm audit --omit=dev --audit-level=high --workspaces --include-workspace-root
 
-      - name: npm audit — web-client
-        run: cd web-client && npm ci && (npm audit --audit-level=high || true)
+      - name: npm audit — web-client production dependencies
+        run: cd web-client && npm ci --ignore-scripts && npm audit --omit=dev --audit-level=high
 
       - name: Trivy — scan for vulnerabilities
         id: trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
 
       - name: Upload Trivy results to GitHub Security
         if: always()
@@ -339,7 +338,7 @@ jobs:
       - name: Install deps
         run: npm ci --ignore-scripts
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0.17.2
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           path: .
           output-file: sbom.spdx.json
