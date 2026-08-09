@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import Reveal from './fx/Reveal';
 const ROWS = [
-    { id: 'RTX 3060 · 12GB', meta: '1080p Ultra', play: '$0.12/hr', host: '$9.20/day' },
-    { id: 'RTX 4070 Ti · 16GB', meta: '1440p Max', play: '$0.24/hr', host: '$18.40/day', hot: true },
-    { id: 'RTX 4090 · 24GB', meta: '4K or training', play: '$0.46/hr', host: '$36.90/day' },
+    { id: 'RTX 3060 · 12GB', meta: 'Blender · SDXL', play: '$0.12/hr', host: '$9.20/day' },
+    { id: 'RTX 4070 Ti · 16GB', meta: 'Cycles · Video AI', play: '$0.24/hr', host: '$18.40/day', hot: true },
+    { id: 'RTX 4090 · 24GB', meta: 'LLMs · 4K render', play: '$0.46/hr', host: '$36.90/day' },
 ];
 const Marketplace = () => {
     const [mode, setMode] = useState('play');
@@ -19,20 +19,20 @@ const Marketplace = () => {
               for <em className="serif-italic text-iridescent">silicon.</em>
             </h2>
             <p className="mt-6 max-w-md text-[17px] leading-[1.75] text-slate-400">
-              Price floats like an exchange, not a subscription. Players pay cents.
-              Hosts harvest their idle hours.
+              Compare capacity by workload fit, verified performance, region, and price.
+              Providers choose what they run and when they are available.
             </p>
 
             <div className="mt-10 inline-flex rounded-full border border-white/10 bg-white/[0.02] p-1">
               {['play', 'host'].map((m) => (<button key={m} onClick={() => setMode(m)} data-mag className={`rounded-full px-6 py-2.5 text-[12.5px] font-semibold uppercase tracking-[0.14em] transition-all ${mode === m ? 'bg-slate-100 text-[#03040c]' : 'text-slate-500 hover:text-slate-200'}`}>
-                  I {m}
+                  {m === 'play' ? 'Rent compute' : 'Provide a GPU'}
                 </button>))}
             </div>
 
             <div className="mt-10 border-l border-cyan-400/40 pl-6">
-              <p className="eyebrow !text-[10px]">{mode === 'play' ? 'From price' : 'Earn up to'}</p>
+              <p className="eyebrow !text-[10px]">{mode === 'play' ? 'Preview price' : 'Preview earning model'}</p>
               <p className="num-mono-huge mt-2 text-4xl text-slate-50">
-                {mode === 'play' ? '$0.12/hr' : '$1,100/mo'}
+                {mode === 'play' ? '$0.12/hr' : 'Usage based'}
               </p>
             </div>
           </Reveal>
@@ -41,11 +41,11 @@ const Marketplace = () => {
             <div className="glass-hairline overflow-hidden">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-7 py-4">
                 <span className="font-mono text-[10.5px] uppercase tracking-[0.3em] text-slate-500">
-                  Order book — live
+                  Capacity board — preview
                 </span>
                 <span className="flex items-center gap-2 font-mono text-[10.5px] text-emerald-400">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400"/>
-                  STREAMING
+                  PREVIEW DATA
                 </span>
               </div>
               {ROWS.map((r, i) => (<div key={r.id} className={`flex items-center justify-between px-7 py-6 transition-colors hover:bg-white/[0.03] ${i < ROWS.length - 1 ? 'border-b border-white/[0.05]' : ''}`}>

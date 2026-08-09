@@ -10,8 +10,25 @@
   body {
     @apply text-slate-100 overflow-x-hidden;
     background: #03040c;
-    cursor: none;
     font-family: 'Space Grotesk', system-ui, sans-serif;
+  }
+
+  /* Keep every native dropdown legible against the dark application theme.
+     Chromium on Windows can otherwise open a light popup while inheriting
+     the select's light text, producing near-invisible option labels. */
+  select {
+    color-scheme: dark;
+  }
+
+  select option,
+  select optgroup {
+    background-color: #0b0d14;
+    color: #e2e8f0;
+  }
+
+  select option:checked {
+    background-color: #1e293b;
+    color: #ffffff;
   }
 
   @media (pointer: coarse), (prefers-reduced-motion: reduce) {
@@ -125,6 +142,20 @@
   .auth-field input {
     @apply min-w-0 flex-1 bg-transparent py-3.5 text-sm text-slate-100 outline-none placeholder:text-slate-700;
   }
+
+  .app-field {
+    @apply block;
+  }
+
+  .app-field > span {
+    @apply mb-2 block font-mono text-[8px] uppercase tracking-[0.2em] text-slate-600;
+  }
+
+  .app-field input,
+  .app-field select {
+    @apply h-11 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-xs text-slate-300 outline-none transition-colors focus:border-indigo-300/35;
+  }
+
 }
 
 @keyframes iridescent-pan {

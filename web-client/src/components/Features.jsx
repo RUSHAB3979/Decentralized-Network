@@ -2,12 +2,12 @@ import React from 'react';
 import { Gauge, ShieldCheck, Boxes, Wallet, Network, Scale } from 'lucide-react';
 import Reveal from './fx/Reveal';
 const FEATURES = [
-    { icon: Gauge, title: 'Sub-frame latency.', body: 'Predictive input staging over direct peer paths.' },
-    { icon: ShieldCheck, title: 'Zero-trust sandbox.', body: 'Ephemeral credentials; hosts never expose their machine.' },
-    { icon: Boxes, title: 'One pool, all jobs.', body: 'Gaming, rendering, training — same fabric, same SLA.' },
-    { icon: Wallet, title: 'Paid per GPU-second.', body: 'Settlement while you sleep. Hardware as passive income.' },
-    { icon: Network, title: 'Edge-routed by default.', body: 'Nearest-node matchmaking with TURN fallback.' },
-    { icon: Scale, title: 'Licensed, not grey-market.', body: 'Publisher rights cleared per title. Clean by design.' },
+    { icon: Gauge, title: 'Workload-aware matching.', body: 'VRAM, region, runtime, cache, price, and reliability shape every placement.' },
+    { icon: ShieldCheck, title: 'Curated before arbitrary.', body: 'Signed runtimes and disposable sandboxes protect customers and providers.' },
+    { icon: Boxes, title: 'Three execution primitives.', body: 'Batch jobs, long-running deployments, and interactive sessions share one control plane.' },
+    { icon: Wallet, title: 'Auditable metering.', body: 'Quotes, spending caps, usage, refunds, and provider earnings use one ledger.' },
+    { icon: Network, title: 'Purpose-built data paths.', body: 'Artifacts, inference requests, and streams move through different secure paths.' },
+    { icon: Scale, title: 'Permission by design.', body: 'Open-source license review and BYOL controls are product requirements, not footnotes.' },
 ];
 const Features = () => (<section id="features" className="relative">
     <div className="hr-fade absolute inset-x-0 top-0"/>
@@ -15,9 +15,9 @@ const Features = () => (<section id="features" className="relative">
       <Reveal>
         <p className="eyebrow"><span className="eyebrow-accent"/>The fabric</p>
         <h2 className="serif-display mt-6 max-w-2xl text-[clamp(2.2rem,5vw,4rem)] leading-[1.02] text-slate-50">
-          Engineered like
+          Built as infrastructure,
           <br />
-          a <em className="serif-italic text-iridescent">market.</em>
+          experienced as a <em className="serif-italic text-iridescent">product.</em>
         </h2>
       </Reveal>
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import Logo from './Logo';
 const COLS = [
-    ['Product', ['Cloud gaming', 'Compute', 'Fabric', 'Status']],
+    ['Product', ['Render jobs', 'Model APIs', 'Workstations', 'Cloud gaming']],
     ['Hosts', ['Start earning', 'Node guides', 'Payouts', 'Safety']],
     ['Company', ['About', 'Careers', 'Press', 'Contact']],
     ['Legal', ['Terms', 'Privacy', 'Rights', 'DMCA']],
@@ -22,7 +22,7 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
             <span className="font-semibold tracking-tight text-slate-100">NodeForge</span>
           </a>
           <p className="mt-5 max-w-xs text-[13.5px] leading-[1.75] text-slate-500">
-            The peer-to-peer fabric for GPU compute and cloud gaming.
+            The open marketplace for rendering, AI models, GPU workstations, and interactive compute.
           </p>
         </div>
         {COLS.map(([head, links]) => (<div key={head}>
@@ -38,8 +38,8 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
       </div>
 
       <div className="mt-16 flex flex-col gap-3 border-t border-white/[0.05] pt-8 font-mono text-[10.5px] uppercase tracking-[0.24em] text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-        <span>© 2026 NodeForge Inc</span>
-        <span className="text-emerald-500/80">All systems operational</span>
+        <span>© 2026 NodeForge</span>
+        <span className="text-emerald-500/80">Frontend preview online</span>
         <span>Est. 2026 · Fabric v1</span>
       </div>
     </div>

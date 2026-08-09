@@ -64,10 +64,10 @@ const NodeTelemetry = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-white">
-              GPU Provider Nodes &amp; Telemetry
+              Provider telemetry preview
             </h2>
             <p className="text-xs text-slate-400">
-              Live hardware metrics from enrolled provider fleet
+              Simulated hardware metrics until provider enrollment is connected
             </p>
           </div>
         </div>

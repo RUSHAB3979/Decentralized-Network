@@ -2,16 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import LiquidRibbon from './fx/LiquidRibbon';
 import Reveal from './fx/Reveal';
-const signupUrl = import.meta.env.BASE_URL + 'signup';
+const consoleUrl = import.meta.env.BASE_URL + '#/app';
 const TICKER = [
-    'EU-WEST · 9MS', 'US-EAST · 11MS', 'GPU-SEC/MIN 1.24M', 'AV1 · 4K120',
-    'HOST SETTLE $3.84/HR', 'AP-SOUTHEAST · 14MS', 'NODES 2,431', 'UPTIME 99.95%',
+    'BLENDER RENDERING', 'OPEN MODEL APIS', 'GPU WORKSTATIONS', 'CURATED COMPUTE',
+    'VERIFIED PROVIDERS', 'USAGE METERING', 'EPHEMERAL SANDBOXES', 'CLOUD GAMING',
 ];
 const STATS = [
-    { v: '8ms', l: 'Median latency' },
-    { v: '2,431', l: 'Live nodes' },
-    { v: '$0.12/hr', l: 'From price' },
-    { v: '99.95%', l: 'Uptime' },
+    { v: '03', l: 'Execution primitives' },
+    { v: '01', l: 'Shared control plane' },
+    { v: 'BYOL', l: 'Licensed software' },
+    { v: 'MVP', l: 'Current stage' },
 ];
 const Hero = () => {
     const [mounted, setMounted] = useState(false);
@@ -30,31 +30,28 @@ const Hero = () => {
         <Reveal>
           <p className="eyebrow">
             <span className="eyebrow-accent"/>
-            Peer-to-peer GPU fabric
+            Open GPU marketplace
             <span className="eyebrow-accent !mr-0 ml-4 !bg-gradient-to-l"/>
           </p>
 
           <h1 className="serif-display mt-8 text-[clamp(3.2rem,9vw,7.75rem)] leading-[0.96] text-slate-50" style={{ textShadow: '0 0 80px rgba(103,232,249,0.12)' }}>
-            The world&rsquo;s
+            Every GPU workflow,
             <br />
-            idle silicon,
-            <br />
-            <em className="serif-italic text-iridescent">liquid</em> for everyone.
+            one <em className="serif-italic text-iridescent">open</em> fabric.
           </h1>
 
           <p className="mx-auto mt-8 max-w-xl text-[17px] leading-[1.75] text-slate-300/90">
-            NodeForge melts stranded GPUs into a single peer-to-peer pool —
-            stream AAA games from a neighbor&rsquo;s rig, or rent your own hardware
-            while you sleep.
+            Render Blender projects, call open models, or reserve an interactive
+            workstation while verified providers earn from idle hardware.
           </p>
 
           <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
-            <a href={signupUrl} className="btn-liquid group" data-mag>
-              Start playing free
+            <a href={consoleUrl} className="btn-liquid group" data-mag>
+              Explore the marketplace
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>
             </a>
             <a href="#marketplace" className="btn-quiet" data-mag>
-              Become a host
+              Provide a GPU
             </a>
           </div>
         </Reveal>

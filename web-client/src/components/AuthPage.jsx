@@ -5,9 +5,9 @@ import GlowCursor from './fx/GlowCursor';
 import Starfield from './fx/Starfield';
 import FilmGrain from './fx/FilmGrain';
 const benefits = [
-    'Access 2,400+ verified GPU nodes',
-    'Stream in 4K with single-digit latency',
-    'Sessions protected with end-to-end encryption',
+    'One identity for render jobs, model APIs, and workstations',
+    'Hard spending limits and auditable usage records',
+    'Verified providers and isolated workload environments',
 ];
 const baseUrl = import.meta.env.BASE_URL;
 const AuthPage = ({ initialMode }) => {
@@ -18,7 +18,7 @@ const AuthPage = ({ initialMode }) => {
     const switchMode = (next) => {
         setMode(next);
         setSubmitted(false);
-        window.history.pushState({}, '', baseUrl + next);
+        window.location.hash = '/' + next;
     };
     const submit = (event) => {
         event.preventDefault();
@@ -54,7 +54,7 @@ const AuthPage = ({ initialMode }) => {
             Your portal to<br />the <em className="serif-italic text-iridescent">liquid</em> cloud.
           </h1>
           <p className="mt-7 max-w-lg text-[16px] leading-7 text-slate-400">
-            One identity for every game, GPU, and region. Enter the fabric and let the network find your perfect machine.
+            One identity for every GPU workflow. Enter the fabric and move from render jobs to model APIs without changing platforms.
           </p>
           <div className="mt-12 space-y-4">
             {benefits.map((benefit) => (<div key={benefit} className="flex items-center gap-4 text-sm text-slate-300">
@@ -65,9 +65,9 @@ const AuthPage = ({ initialMode }) => {
               </div>))}
           </div>
           <div className="mt-14 flex items-center gap-5 border-t border-white/[0.07] pt-7">
-            <div><p className="font-mono text-xl text-white">8ms</p><p className="mt-1 text-[9px] uppercase tracking-[0.25em] text-slate-600">Median latency</p></div>
+            <div><p className="font-mono text-xl text-white">03</p><p className="mt-1 text-[9px] uppercase tracking-[0.25em] text-slate-600">Execution primitives</p></div>
             <div className="h-8 w-px bg-white/[0.08]"/>
-            <div><p className="font-mono text-xl text-white">99.95%</p><p className="mt-1 text-[9px] uppercase tracking-[0.25em] text-slate-600">Fabric uptime</p></div>
+            <div><p className="font-mono text-xl text-white">MVP</p><p className="mt-1 text-[9px] uppercase tracking-[0.25em] text-slate-600">Current stage</p></div>
           </div>
         </section>
 
@@ -140,7 +140,7 @@ const AuthPage = ({ initialMode }) => {
           </div>
           <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[9px] uppercase tracking-[0.24em] text-slate-600">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.8)]"/>
-            Auth gateway operational · TLS 1.3
+            Frontend preview · authentication not connected
           </div>
         </section>
       </main>
