@@ -7,6 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Default token scopes for every job that does not declare its own block.
+# pull-requests:read is required by dorny/paths-filter on pull_request events,
+# where it resolves changed files through the API instead of a local git diff.
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.12'
