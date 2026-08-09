@@ -2,7 +2,7 @@
 
 Base URL (local): `http://localhost:8080`
 
-All JSON payloads are validated with shared Zod schemas from `packages/contracts`.
+The current TypeScript baseline validates JSON payloads with shared Zod schemas from `packages/contracts`. The planned Python/Flask implementation must preserve this documented behavior using Pydantic before cutover; see [PYTHON-FLASK-BACKEND-MIGRATION.md](PYTHON-FLASK-BACKEND-MIGRATION.md).
 
 ## Health
 

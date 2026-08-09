@@ -1,5 +1,7 @@
 # Architecture
 
+> **Implementation status:** This document describes the currently running TypeScript baseline. The approved Python/Flask migration is specified in [PYTHON-FLASK-BACKEND-MIGRATION.md](PYTHON-FLASK-BACKEND-MIGRATION.md); API behavior must remain stable until parity is verified.
+
 ## 1. System Overview
 
 Current MVP consists of three modules:
