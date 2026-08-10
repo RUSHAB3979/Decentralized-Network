@@ -1,5 +1,7 @@
 # Architecture
 
+> **Implementation status:** This document describes the currently running TypeScript baseline. The approved Python/FastAPI migration is specified in [PYTHON-FASTAPI-BACKEND-MIGRATION.md](PYTHON-FASTAPI-BACKEND-MIGRATION.md); API behavior must remain stable until parity is verified.
+
 ## 1. System Overview
 
 Current MVP consists of three modules:

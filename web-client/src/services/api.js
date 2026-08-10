@@ -133,19 +133,31 @@ export const MOCK_NODES = [
 ];
 // ---------------------------------------------------------------------------
 // Health check — tries the real orchestrator, falls back to mock
+//
+// Set VITE_ORCHESTRATOR_URL in web-client/.env.local to point at a running
+// backend. The default matches ORCHESTRATOR_URL in the repo .env.example; the
+// TypeScript orchestrator listens on 8080 and uvicorn defaults to 8000, so the
+// port is configuration rather than a constant.
 // ---------------------------------------------------------------------------
+export const ORCHESTRATOR_URL =
+    import.meta.env.VITE_ORCHESTRATOR_URL ?? 'http://localhost:8080';
+
 export async function checkOrchestratorHealth() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch('http://localhost:8000/health', {
+        const res = await fetch(`${ORCHESTRATOR_URL}/health`, {
             signal: controller.signal,
         });
-        clearTimeout(timeout);
+        // A 503 still carries a meaningful body ({status:'degraded', db:'down'}),
+        // so parse it rather than discarding it as a transport failure.
         return (await res.json());
     }
     catch {
         return { status: 'unreachable', db: 'mock', version: '0.1.0-mock' };
+    }
+    finally {
+        clearTimeout(timeout);
     }
 }
 // ---------------------------------------------------------------------------

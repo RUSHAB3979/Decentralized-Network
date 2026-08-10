@@ -5,20 +5,20 @@ const STEPS = [
     {
         n: 'I',
         icon: MonitorPlay,
-        title: 'Pick a title, or a job.',
-        body: 'Gaming sessions and compute jobs enter the same queue. One fabric, one meter.',
+        title: 'Describe the workload.',
+        body: 'Upload a project, choose a model, or reserve an interactive GPU profile.',
     },
     {
         n: 'II',
         icon: Waypoints,
-        title: 'Routed in milliseconds.',
-        body: 'Edge matchmaking claims the nearest verified node; WebRTC opens a direct path.',
+        title: 'Match verified capacity.',
+        body: 'Hard eligibility filters run before price, performance, cache, and reliability ranking.',
     },
     {
         n: 'III',
         icon: TimerReset,
-        title: 'Settled per second.',
-        body: 'Hosts are paid per GPU-second, instantly. Players pay only while pixels flow.',
+        title: 'Meter, verify, settle.',
+        body: 'Usage, artifacts, failures, customer charges, and provider earnings stay auditable.',
     },
 ];
 const HowItWorks = () => (<section id="how" className="relative">
@@ -27,7 +27,7 @@ const HowItWorks = () => (<section id="how" className="relative">
       <Reveal>
         <p className="eyebrow"><span className="eyebrow-accent"/>The loop</p>
         <h2 className="serif-display mt-6 text-[clamp(2.2rem,5vw,4rem)] leading-[1.02] text-slate-50">
-          From intent to pixels,
+          From intent to output,
           <br />
           in <em className="serif-italic text-iridescent">three</em> movements.
         </h2>

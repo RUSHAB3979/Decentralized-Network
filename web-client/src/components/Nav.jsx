@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import Logo from './Logo';
 const LINKS = [
-    ['Fabric', '#features'],
+    ['Products', '#features'],
+    ['Workloads', '#workloads'],
     ['Market', '#marketplace'],
-    ['Games', '#games'],
-    ['Hosts', '#marketplace'],
+    ['Providers', '#marketplace'],
 ];
-const signupUrl = import.meta.env.BASE_URL + 'signup';
+const consoleUrl = import.meta.env.BASE_URL + '#/app';
 const Nav = () => {
     const [scrolled, setScrolled] = useState(false);
     useEffect(() => {
@@ -35,8 +35,8 @@ const Nav = () => {
             </a>))}
         </div>
 
-        <a href={signupUrl} className="group inline-flex items-center gap-1.5 rounded-full border border-white/15 px-5 py-2.5 text-[12.5px] font-semibold tracking-wide text-slate-100 transition-all hover:border-white/30 hover:bg-white/[0.04]" data-mag>
-          Get started
+        <a href={consoleUrl} className="group inline-flex items-center gap-1.5 rounded-full border border-white/15 px-5 py-2.5 text-[12.5px] font-semibold tracking-wide text-slate-100 transition-all hover:border-white/30 hover:bg-white/[0.04]" data-mag>
+          Open console
           <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"/>
         </a>
       </nav>

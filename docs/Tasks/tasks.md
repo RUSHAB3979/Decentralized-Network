@@ -77,7 +77,7 @@ Without a node that can reach the orchestrator, catalog/streaming/matching are f
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| C1 | Create orchestrator package + venv + dependencies (FastAPI or Flask — pick one) | pending | [ ] |
+| C1 | Create orchestrator package + venv + dependencies (FastAPI) | pending | [ ] |
 | C2 | App entrypoint that starts an HTTP server | pending | [ ] |
 | C3 | Implement `GET /health` → JSON ok | pending | [ ] |
 | C4 | Load `DATABASE_URL` from env; run `SELECT 1` | pending | [ ] |
