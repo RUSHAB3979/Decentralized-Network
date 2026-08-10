@@ -13,7 +13,7 @@
     "@market/contracts": "0.1.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "tsx": "^4.23.10",
+    "typescript": "^7.0.2"
   }
 }
