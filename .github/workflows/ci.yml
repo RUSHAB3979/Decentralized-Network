@@ -30,6 +30,7 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     outputs:
       contracts: ${{ steps.filter.outputs.contracts }}
       orchestrator: ${{ steps.filter.outputs.orchestrator }}
@@ -40,7 +41,9 @@ jobs:
       context: ${{ steps.filter.outputs.context }}
     steps:
       - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
+      # SHA-pinned: this is third-party and it reads the repo through the API
+      # with the workflow token. A moved tag would run unreviewed code here.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.2
         id: filter
         with:
           filters: |
@@ -67,6 +70,8 @@ jobs:
             python:
               - 'blender_pvp/**'
               - 'orchestrator/**'
+              - 'agent/**'
+              - '.github/workflows/**'
             docker:
               - 'docker-compose.yml'
               - '.github/workflows/**'
@@ -85,6 +90,7 @@ jobs:
   contracts:
     name: Contracts — typecheck + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     steps:
@@ -109,6 +115,7 @@ jobs:
   orchestrator:
     name: Orchestrator — typecheck + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, contracts]
     if: needs.changes.outputs.orchestrator == 'true'
     steps:
@@ -141,6 +148,7 @@ jobs:
   provider-agent:
     name: Provider Agent — typecheck + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, contracts]
     if: needs.changes.outputs.agent == 'true'
     steps:
@@ -173,6 +181,7 @@ jobs:
   web:
     name: Web Client — build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.web == 'true'
     defaults:
@@ -191,11 +200,12 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------
-  # 6. PYTHON — Blender P2P worker scripts
+  # 6. PYTHON — FastAPI orchestrator, provider agent, Blender worker scripts
   # ---------------------------------------------------------------
   python:
-    name: Python — lint + syntax check
+    name: Python — lint + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.python == 'true'
     steps:
@@ -204,12 +214,44 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-      - name: Install lint deps
-        run: pip install ruff mypy
+          cache-dependency-path: orchestrator/requirements.txt
+
+      - name: Install dev tooling
+        run: pip install ruff==0.16.2 pytest==9.1.1 httpx==0.28.1
+
+      # Resolving requirements.txt in CI is itself the check: it proves the
+      # pins install cleanly on a machine that is not the author's laptop.
+      - name: Install orchestrator runtime dependencies
+        run: pip install -r orchestrator/requirements.txt
+
+      # Rules and target-version come from .ruff.toml, so this run is identical
+      # to a local one. Scanning from the repo root rather than naming
+      # directories matters: git does not check out empty directories, so
+      # `agent/` does not exist on a fresh runner until the first file lands
+      # there, and naming it explicitly would fail the step.
       - name: Ruff lint
-        run: ruff check blender_pvp/ orchestrator/ --select=E9,F63,F7,F82 --target-version=py312
+        run: ruff check .
+
+      # py_compile every tracked .py rather than one hardcoded file, so new
+      # modules are covered the moment they are committed.
       - name: Compile check
-        run: python -m py_compile blender_pvp/bmc.py
+        run: git ls-files '*.py' -z | xargs -0 --no-run-if-empty python -m py_compile
+
+      # pytest exits 5 for "no tests collected", which is the current state of
+      # the migration. Tolerate exactly that code and nothing else: a blanket
+      # `|| true` would also swallow exit 4 (bad test-discovery config) and
+      # exit 1 (real failures), which is how a suite silently stops running.
+      - name: Pytest
+        run: |
+          set +e
+          pytest -q
+          code=$?
+          set -e
+          if [ "$code" -eq 5 ]; then
+            echo "::notice::pytest collected no tests yet — nothing to run."
+            exit 0
+          fi
+          exit "$code"
 
   # ---------------------------------------------------------------
   # 6.5 CONTEXT SERVER — startup knowledge base + MCP bridge
@@ -217,6 +259,7 @@ jobs:
   context-server:
     name: Context Server — typecheck + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, contracts]
     if: needs.changes.outputs.context == 'true'
     steps:
@@ -241,6 +284,7 @@ jobs:
   docker:
     name: Docker — validate compose + build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.docker == 'true'
     env:
@@ -269,6 +313,7 @@ jobs:
   security:
     name: Security — secrets + vuln scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read          # REQUIRED: declaring any permissions block sets all others to 'none';
                               # without this, checkout gets a tokenless fetch -> "repository not found"
@@ -328,6 +373,7 @@ jobs:
   sbom:
     name: SBOM — generate software bill of materials
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true' || needs.changes.outputs.agent == 'true'
     steps:
@@ -356,6 +402,7 @@ jobs:
   all-checks:
     name: 🟢 All checks passed
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: always()
     needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom, context-server]
     steps:

@@ -1,0 +1,45 @@
+# Ruff configuration — shared by local runs and the CI "Python" job.
+#
+# The rule set is pinned explicitly rather than inherited. Ruff's built-in
+# default currently enables ~415 rules (flake8-bandit, flake8-blind-except,
+# pyupgrade, isort and more), and that default has widened across releases —
+# so relying on it means a routine ruff upgrade can turn CI red without a
+# single line of project code changing.
+
+target-version = "py312"
+
+# Local virtualenvs and caches. Ruff already honours .gitignore; these are
+# listed so a direct `ruff check orchestrator/` on a dev machine behaves the
+# same as the CI run, which only ever sees tracked files.
+exclude = [
+    "orchestrator/env",
+    "agent/env",
+    ".venv",
+    "node_modules",
+]
+
+[lint]
+# Scoped to rules that indicate a defect, not a formatting preference. A lint
+# gate that fails on where you put a semicolon trains you to ignore it; one
+# that only fires on real bugs stays worth reading.
+#
+# E9  syntax and IO errors — code that cannot run
+# F   pyflakes — undefined names, unused imports, f-strings with no
+#     placeholder, repeated dict keys
+# B   flake8-bugbear — legal Python that is still a bug: mutable default
+#     arguments, loop-variable capture in closures, `assert` on a tuple
+select = ["E9", "F", "B"]
+
+# Next tier, deliberately not enabled yet. Each is largely auto-fixable, but
+# adopting one rewrites existing files — do that in a standalone commit rather
+# than mixed into feature work:
+#
+#   "E4", "E7"  pycodestyle — grouped imports, semicolons. Style only;
+#               blender_pvp/bmc.py currently trips 4 of these.
+#   "I"         isort — import ordering
+#   "UP"        pyupgrade — modern syntax (socket.timeout -> TimeoutError)
+#   "S"         flake8-bandit — security lint. Expect noise once the FastAPI
+#               orchestrator binds 0.0.0.0 (S104); review per line, do not
+#               blanket-ignore.
+#
+# To adopt: add the code above, then run `ruff check --fix .`
