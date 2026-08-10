@@ -1,0 +1,54 @@
+name: Dependabot auto-merge
+
+# Turns routine dependency updates into a no-op for humans, without turning
+# them into an unreviewed supply-chain hole.
+#
+# What actually makes this safe is NOT this file — it is the ruleset on main
+# ("main: require CI gate") that marks "🟢 All checks passed" as required.
+# `gh pr merge --auto` only queues the merge; GitHub then holds it until every
+# REQUIRED check is green. With no required checks, --auto merges instantly,
+# which is strictly worse than merging by hand. If that ruleset is ever
+# removed, delete this workflow in the same commit.
+#
+# Scope: patch and minor only. Major bumps still need a human, because four of
+# this repo's five open action bumps are majors to CI itself — a bad one takes
+# the pipeline down for everybody at once.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Queue non-major Dependabot updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # github.actor is the account that opened the PR. Anyone else's PR is
+    # ignored entirely — this job never touches human-authored branches.
+    if: github.actor == 'dependabot[bot]'
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        # Parses the structured commit message Dependabot writes, which is the
+        # only reliable source of semver intent. Do not infer it from the PR
+        # title: grouped updates ("bump the npm-production group with 3
+        # updates") carry no version numbers at all.
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Queue auto-merge (patch + minor)
+        if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Explain why a major was left alone
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        run: |
+          echo "::notice::${{ steps.meta.outputs.dependency-names }} is a MAJOR bump — left for human review."
+          echo "Major updates are not auto-merged. Review the changelog, then merge manually."
