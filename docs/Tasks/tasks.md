@@ -1,11 +1,16 @@
 # Task Tracker — P2P Cloud Gaming Marketplace
 
-**Owner:** You (solo, collaborators later)  
-**Stack (now):** Python only · Windows · Postgres via Docker  
-**Cadence:** ~2–3 hours/day  
-**Sparring mode:** You write all code · plan/review with co-founder agent  
+**M0 owner:** [@RUSHAB3979](https://github.com/RUSHAB3979) (solo — see note below)
+**Team:** four collaborators onboard since 2026-08-10 — [TEAM-EXECUTION-PLAN.md](../TEAM-EXECUTION-PLAN.md)
+**Stack (now):** Python (FastAPI) · Windows · Postgres via Docker
+**Cadence:** ~2–3 hours/day, placement prep permitting
 
-**Related:** [plan.md](./plan.md)
+**Related:** [TEAM-EXECUTION-PLAN.md](../TEAM-EXECUTION-PLAN.md) · [ROLES.md](../ROLES.md) · [PYTHON-FASTAPI-BACKEND-MIGRATION.md](../PYTHON-FASTAPI-BACKEND-MIGRATION.md)
+
+> **M0 stays a solo build.** It is a deliberate learning exercise: the founder
+> writes every line of `orchestrator/` and `agent/`. The other four are not
+> idle — their parallel, non-blocking work is in TEAM-EXECUTION-PLAN.md §7, and
+> none of it touches these two directories.
 
 ---
 
@@ -16,8 +21,14 @@
 | **Milestone** | M0 — Control-plane hello world |
 | **Phase** | Phase 0 (Foundations) → edge of Phase 1 |
 | **Started** | 2026-07-15 |
-| **Hard deadline** | **2026-07-17 (Friday) end of day** |
-| **Stretch polish deadline** | 2026-07-21 (Monday) end of day |
+| **Timebox** | **2026-08-24** — decision point, not a hard deadline |
+| **Progress** | 6 of 23 tasks verified done |
+
+**What the timebox means.** On 2026-08-24, if M0 is not done, `orchestrator/`
+transfers to [@YogitaKanwar](https://github.com/YogitaKanwar) and the founder
+keeps R1 only. Decide it *on the date*. The original deadlines (2026-07-15/16/17
+/21) were left to drift for 24 days while the tracker still read `pending` for
+work that was finished — that failure mode is what the timebox exists to stop.
 
 ---
 
@@ -30,6 +41,7 @@ Postgres up → orchestrator `GET /health` OK → agent pings orchestrator and l
 ### Why this first
 
 Without a node that can reach the orchestrator, catalog/streaming/matching are fiction.
+Three of the four collaborators are blocked behind this endpoint.
 
 ### Definition of done (DoD)
 
@@ -37,56 +49,75 @@ Without a node that can reach the orchestrator, catalog/streaming/matching are f
 - [ ] Orchestrator starts and `GET /health` returns success (browser, curl, or Invoke-WebRequest)
 - [ ] Orchestrator can talk to Postgres (`SELECT 1` or health reports `db: ok`)
 - [ ] Agent starts, reads orchestrator URL from env, hits `/health`, logs reachable
-- [ ] `.gitignore` excludes venv, `.env`, `__pycache__`, IDE junk
-- [ ] `.env.example` documents required vars (no real secrets committed)
+- [x] `.gitignore` excludes venv, `.env`, `__pycache__`, IDE junk
+- [x] `.env.example` documents required vars (no real secrets committed)
 - [ ] `README.md` explains how to run DB, orchestrator, and agent on Windows
 
 **Out of scope for M0:** auth, register/heartbeat tables, catalog, WebRTC, C++, payments.
 
----
-
-## Task breakdown + deadlines
-
-### Block A — Repo hygiene  
-**Deadline: 2026-07-15 (today)** · Estimate: ~45–60 min
-
-| ID | Task | Status | Done |
-|----|------|--------|------|
-| A1 | `git init` (if not already) | pending | [ ] |
-| A2 | Add `.gitignore` (Python, venv, `.env`, Windows/IDE) | pending | [ ] |
-| A3 | Add `.env.example` (`DATABASE_URL`, `ORCHESTRATOR_URL` placeholders) | pending | [ ] |
-| A4 | Add root `README.md` (what / how to run — can be stub first) | pending | [ ] |
-| A5 | Create folders: `orchestrator/`, `agent/` (and optional `docs/`) | pending | [ ] |
+**Contract note:** `/health` must return `{status, db, version}`. The frozen
+TypeScript service returns `{ok, providers, jobs}` — do not copy it. The frontend
+already codes against the Python shape.
 
 ---
 
-### Block B — Postgres  
-**Deadline: 2026-07-15 (today) or 2026-07-16 morning** · Estimate: ~30–45 min
+## Task breakdown
+
+Status: `pending` · `in_progress` · `blocked` · `done` · `confirm` (believed done,
+not verifiable from the repo — tick it after checking on the machine).
+
+### Block A — Repo hygiene · **done**
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| B1 | Install/verify Docker Desktop on Windows | pending | [ ] |
-| B2 | Add `docker-compose.yml` with Postgres only | pending | [ ] |
+| A1 | `git init` (if not already) | done | [x] |
+| A2 | Add `.gitignore` (Python, venv, `.env`, Windows/IDE) | done | [x] |
+| A3 | Add `.env.example` (`DATABASE_URL`, `ORCHESTRATOR_URL` placeholders) | done | [x] |
+| A4 | Add root `README.md` (what / how to run — can be stub first) | done | [x] |
+| A5 | Create folders: `orchestrator/`, `agent/` (and optional `docs/`) | in_progress | [ ] |
+
+> **A5:** `orchestrator/` is tracked (`requirements.txt`). `agent/` exists on disk
+> but is empty, and git does not track empty directories — so it does not exist
+> for anyone who clones. It closes when D1 puts a file in it.
+
+---
+
+### Block B — Postgres
+
+| ID | Task | Status | Done |
+|----|------|--------|------|
+| B1 | Install/verify Docker Desktop on Windows | confirm | [ ] |
+| B2 | Add `docker-compose.yml` with Postgres only | done | [x] |
 | B3 | `docker compose up -d` and confirm container healthy | pending | [ ] |
 | B4 | Confirm you can connect (any client or one-shot command) | pending | [ ] |
 
+> Docker Desktop was not running when this file was last updated
+> (2026-08-10), so B1/B3/B4 could not be verified. B3 is also
+> [@YogitaKanwar](https://github.com/YogitaKanwar)'s Track 0 task — she runs it on
+> a clean machine, which is a stronger test than it passing here.
+
 ---
 
-### Block C — Orchestrator health  
-**Deadline: 2026-07-16 (Thursday)** · Estimate: ~60–90 min
+### Block C — Orchestrator health
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| C1 | Create orchestrator package + venv + dependencies (FastAPI) | pending | [ ] |
+| C1 | Create orchestrator package + venv + dependencies (FastAPI) | in_progress | [ ] |
 | C2 | App entrypoint that starts an HTTP server | pending | [ ] |
 | C3 | Implement `GET /health` → JSON ok | pending | [ ] |
 | C4 | Load `DATABASE_URL` from env; run `SELECT 1` | pending | [ ] |
-| C5 | Extend health (or separate check) so DB failure is visible | pending | [ ] |
+| C5 | Extend health (or separate check) so DB failure is visible (503) | pending | [ ] |
+
+> **C1:** `orchestrator/requirements.txt` lists fastapi, uvicorn[standard],
+> psycopg[binary], python-dotenv — **unpinned**. That is the whole of the Python
+> backend today: four dependency names, no code. Pinning is E1.
+
+**Read before C3:** PYTHON-FASTAPI-BACKEND-MIGRATION.md §7. The 422-vs-400
+validation trap costs an hour if you meet it as a bug instead of a note.
 
 ---
 
-### Block D — Agent ping  
-**Deadline: 2026-07-17 (Friday) — HARD DEADLINE for full M0** · Estimate: ~45–75 min
+### Block D — Agent ping
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
@@ -96,65 +127,45 @@ Without a node that can reach the orchestrator, catalog/streaming/matching are f
 | D4 | Log clear success / failure (exit non-zero on failure is a plus) | pending | [ ] |
 | D5 | Update README with exact Windows run steps for all three pieces | pending | [ ] |
 
----
-
-### Block E — Stretch polish (collaborator-ready)  
-**Deadline: 2026-07-21 (Monday)** · Estimate: 1–2 sessions after M0
-
-| ID | Task | Status | Done |
-|----|------|--------|------|
-| E1 | Pin dependencies (`requirements.txt` or `pyproject.toml`) | pending | [ ] |
-| E2 | Short ADR: hybrid architecture, Python now / C++ later | pending | [ ] |
-| E3 | Short ADR: BYOL + allowlist legal model | pending | [ ] |
-| E4 | Domain notes: list entities User / ProviderNode / Session (comments or doc only) | pending | [ ] |
+> Block D is the hand-off point. Once `agent/` has a file in it, the directory
+> belongs to [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) (R6) and the
+> M1 heartbeat loop is his. Until then he stays out of it — his spike work lives
+> in `docs/spikes/`.
 
 ---
 
-## Deadline summary
+### Block E — Polish
 
-| Milestone | Deadline | Severity |
-|-----------|----------|----------|
-| Blocks A–B (repo + Postgres) | **2026-07-15** | Soft (same day start) |
-| Block C (orchestrator health + DB) | **2026-07-16** | Firm |
-| **M0 complete (A–D)** | **2026-07-17 EOD** | **HARD** |
-| Block E (polish) | **2026-07-21 EOD** | Soft stretch |
+Originally titled "collaborator-ready" and scheduled after M0. The collaborators
+arrived first, so the title is retired; the tasks are still worth doing.
 
-**If you miss the hard deadline:** do not expand scope. Finish only D1–D4 before anything else. No catalog, no streaming “to catch up.”
+| ID | Task | Status | Done | Owner |
+|----|------|--------|------|-------|
+| E1 | Pin dependencies (`requirements.txt` or `pyproject.toml`) | pending | [ ] | R1 |
+| E2 | Short ADR: hybrid architecture, Python now / C++ later | pending | [ ] | R1 |
+| E3 | Short ADR: BYOL + allowlist legal model | pending | [ ] | R4 |
+| E4 | Domain notes: list entities User / ProviderNode / Session | pending | [ ] | R9 |
 
----
-
-## Daily plan (suggested, 2–3 hrs/day)
-
-| Day | Date | Focus |
-|-----|------|--------|
-| Day 1 | Wed 2026-07-15 | A + B (+ start C if time) |
-| Day 2 | Thu 2026-07-16 | Finish C |
-| Day 3 | Fri 2026-07-17 | D → **M0 done** |
-| Weekend buffer | 2026-07-18–19 | Only if M0 slipped; otherwise rest or light README |
-| Day 4–5 | 2026-07-20–21 | E polish optional |
+> **E1 is no longer optional polish.** Four people are about to install these
+> dependencies on four machines. Unpinned means four different resolved trees and
+> a "works on mine" bug nobody can reproduce. Do it before they clone.
+> **E4** folds into @YogitaKanwar's M1 schema design (TEAM-EXECUTION-PLAN.md §7).
 
 ---
 
 ## After M0 (do not start early)
 
-**Next milestone M1 — Register + heartbeat** (deadline to set when M0 is checked off)
+**M1 — Register + heartbeat.** First genuinely parallel milestone; per-person
+split in TEAM-EXECUTION-PLAN.md §7.
 
-Preview only:
-
-1. `ProviderNode` table + migration  
-2. `POST /providers/register`  
-3. `POST /providers/heartbeat`  
-4. Agent loop every N seconds  
-5. Stale → offline (TTL)
-
----
-
-## Status legend
-
-- `pending` → not started  
-- `in_progress` → actively coding  
-- `blocked` → note why in Progress log  
-- `done` → DoD met  
+1. `ProviderNode` table + migration — R9
+2. Pydantic models for heartbeat/capability/metrics — R1, **ships first**
+3. `POST /providers/register` · `POST /providers/heartbeat` — R5
+4. Agent loop every N seconds — R6
+5. Stale → offline (TTL) — R5
+6. Frontend wires the provider list to real data, deletes the mock — R8
+7. Security review: the heartbeat endpoint is unauthenticated — R4 decides
+   whether that is acceptable for M1 and writes down why
 
 ---
 
@@ -163,10 +174,9 @@ Preview only:
 | Date | Note |
 |------|------|
 | 2026-07-15 | Task file created. M0 hard deadline set to 2026-07-17 EOD. |
+| 2026-08-10 | **Tracker was stale by 24 days** — all 23 tasks read `pending` while A1–A4 and B2 were done. Audited against the repo, statuses corrected, expired deadlines replaced with a 2026-08-24 timebox. Four collaborators onboarded; roles assigned in ROLES.md, paths in CODEOWNERS, execution in TEAM-EXECUTION-PLAN.md. |
 
-<!-- Add a line each session, e.g.:
-| 2026-07-15 | Finished A1–A5, Postgres up. |
--->
+<!-- Add a line each session. -->
 
 ---
 
@@ -186,5 +196,6 @@ WHAT I THINK NEXT:
 
 | Role | Name | M0 accepted when |
 |------|------|------------------|
-| Builder | You | All DoD checkboxes checked |
-| Sparring partner | Co-founder agent | You demo: agent log shows orchestrator reachable |
+| Builder | @RUSHAB3979 | All DoD checkboxes checked |
+| Verifier | @YogitaKanwar | She runs it from a clean clone and it works — not the author's machine |
+| Sparring partner | Co-founder agent | Agent log shows orchestrator reachable |
