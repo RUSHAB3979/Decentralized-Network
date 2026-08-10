@@ -86,15 +86,26 @@ not verifiable from the repo — tick it after checking on the machine).
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| B1 | Install/verify Docker Desktop on Windows | confirm | [ ] |
+| B1 | Install/verify Docker Desktop on Windows | done | [x] |
 | B2 | Add `docker-compose.yml` with Postgres only | done | [x] |
-| B3 | `docker compose up -d` and confirm container healthy | pending | [ ] |
-| B4 | Confirm you can connect (any client or one-shot command) | pending | [ ] |
+| B3 | `docker compose up -d db` and confirm container healthy | done | [x] |
+| B4 | Confirm you can connect (any client or one-shot command) | done | [x] |
 
-> Docker Desktop was not running when this file was last updated
-> (2026-08-10), so B1/B3/B4 could not be verified. B3 is also
-> [@YogitaKanwar](https://github.com/YogitaKanwar)'s Track 0 task — she runs it on
-> a clean machine, which is a stronger test than it passing here.
+> Verified 2026-08-10: Docker engine 28.4.0, `marketplace_db` healthy,
+> `SELECT 1` succeeded against PostgreSQL 16.14 over psycopg 3.3.4.
+>
+> **Use `docker compose up -d db`, not bare `docker compose up -d`.** The compose
+> file still describes the frozen TypeScript stack: its `orchestrator` service is
+> `image: node:20` running `npm run dev:orchestrator` on port 8080. Bring the whole
+> file up and a Node process occupies the port your Python app wants, and the bind
+> error will not mention Docker. Rewriting compose for the Python stack is
+> [@YogitaKanwar](https://github.com/YogitaKanwar)'s (R3) task.
+>
+> **`DATABASE_URL` needs a percent-encoded password.** An unencoded `@` in the
+> password made libpq read the host as `123@localhost` and report
+> `failed to resolve host` — an error that points at DNS and is really string
+> escaping. `.env.example` now documents this. B3 is also @YogitaKanwar's Track 0
+> task; her clean-machine run is a stronger test than this one.
 
 ---
 
@@ -102,7 +113,7 @@ not verifiable from the repo — tick it after checking on the machine).
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| C1 | Create orchestrator package + venv + dependencies (FastAPI) | in_progress | [ ] |
+| C1 | Create orchestrator package + venv + dependencies (FastAPI) | done | [x] |
 | C2 | App entrypoint that starts an HTTP server | pending | [ ] |
 | C3 | Implement `GET /health` → JSON ok | pending | [ ] |
 | C4 | Load `DATABASE_URL` from env; run `SELECT 1` | pending | [ ] |
