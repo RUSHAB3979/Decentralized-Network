@@ -39,8 +39,8 @@ Execution detail — first tasks, sequencing, and clash rules — lives in
 |---|---|---|
 | [@RUSHAB3979](https://github.com/RUSHAB3979) | **R1** Architect + **R5** Orchestrator *(M0 only)* | `orchestrator/`, `packages/contracts/`, all interface decisions |
 | [@YogitaKanwar](https://github.com/YogitaKanwar) | **R3** Cloud/Platform + **R9** Database → **R5** after M0 | `.github/`, `docker-compose.yml`, schema + migrations — task list: [yogitatasks.md](./yogitatasks.md) |
-| [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, streaming/TURN, telemetry |
-| [@ryujikentaro](https://github.com/ryujikentaro) | **R4** Security & Sandbox + **R10** SRE | Threat model, sandbox, CI security gates, runbooks |
+| [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, streaming/TURN, telemetry — task list: [shubhtasks.md](./shubhtasks.md) |
+| [@ryujikentaro](https://github.com/ryujikentaro) | **R4** Security & Sandbox + **R10** SRE | Threat model, sandbox, CI security gates, runbooks — task list: [ryujitasks.md](./ryujitasks.md) |
 | [@AdarshNarwankar](https://github.com/AdarshNarwankar) | **R8** Frontend + **R7** Payments *(when it starts)* | `web-client/` — task list: [adarshtasks.md](./adarshtasks.md) |
 
 ### Why this shape
