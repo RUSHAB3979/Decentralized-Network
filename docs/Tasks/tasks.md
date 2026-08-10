@@ -45,9 +45,9 @@ Three of the four collaborators are blocked behind this endpoint.
 
 ### Definition of done (DoD)
 
-- [ ] Docker Postgres is running on Windows (Docker Desktop)
-- [ ] Orchestrator starts and `GET /health` returns success (browser, curl, or Invoke-WebRequest)
-- [ ] Orchestrator can talk to Postgres (`SELECT 1` or health reports `db: ok`)
+- [x] Docker Postgres is running on Windows (Docker Desktop)
+- [x] Orchestrator starts and `GET /health` returns success (browser, curl, or Invoke-WebRequest)
+- [x] Orchestrator can talk to Postgres (`SELECT 1` or health reports `db: ok`)
 - [ ] Agent starts, reads orchestrator URL from env, hits `/health`, logs reachable
 - [x] `.gitignore` excludes venv, `.env`, `__pycache__`, IDE junk
 - [x] `.env.example` documents required vars (no real secrets committed)
@@ -86,15 +86,26 @@ not verifiable from the repo — tick it after checking on the machine).
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| B1 | Install/verify Docker Desktop on Windows | confirm | [ ] |
+| B1 | Install/verify Docker Desktop on Windows | done | [x] |
 | B2 | Add `docker-compose.yml` with Postgres only | done | [x] |
-| B3 | `docker compose up -d` and confirm container healthy | pending | [ ] |
-| B4 | Confirm you can connect (any client or one-shot command) | pending | [ ] |
+| B3 | `docker compose up -d db` and confirm container healthy | done | [x] |
+| B4 | Confirm you can connect (any client or one-shot command) | done | [x] |
 
-> Docker Desktop was not running when this file was last updated
-> (2026-08-10), so B1/B3/B4 could not be verified. B3 is also
-> [@YogitaKanwar](https://github.com/YogitaKanwar)'s Track 0 task — she runs it on
-> a clean machine, which is a stronger test than it passing here.
+> Verified 2026-08-10: Docker engine 28.4.0, `marketplace_db` healthy,
+> `SELECT 1` succeeded against PostgreSQL 16.14 over psycopg 3.3.4.
+>
+> **Use `docker compose up -d db`, not bare `docker compose up -d`.** The compose
+> file still describes the frozen TypeScript stack: its `orchestrator` service is
+> `image: node:20` running `npm run dev:orchestrator` on port 8080. Bring the whole
+> file up and a Node process occupies the port your Python app wants, and the bind
+> error will not mention Docker. Rewriting compose for the Python stack is
+> [@YogitaKanwar](https://github.com/YogitaKanwar)'s (R3) task.
+>
+> **`DATABASE_URL` needs a percent-encoded password.** An unencoded `@` in the
+> password made libpq read the host as `123@localhost` and report
+> `failed to resolve host` — an error that points at DNS and is really string
+> escaping. `.env.example` now documents this. B3 is also @YogitaKanwar's Track 0
+> task; her clean-machine run is a stronger test than this one.
 
 ---
 
@@ -102,11 +113,34 @@ not verifiable from the repo — tick it after checking on the machine).
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| C1 | Create orchestrator package + venv + dependencies (FastAPI) | in_progress | [ ] |
-| C2 | App entrypoint that starts an HTTP server | pending | [ ] |
-| C3 | Implement `GET /health` → JSON ok | pending | [ ] |
-| C4 | Load `DATABASE_URL` from env; run `SELECT 1` | pending | [ ] |
-| C5 | Extend health (or separate check) so DB failure is visible (503) | pending | [ ] |
+| C1 | Create orchestrator package + venv + dependencies (FastAPI) | done | [x] |
+| C2 | App entrypoint that starts an HTTP server | done | [x] |
+| C3 | Implement `GET /health` → JSON ok | done | [x] |
+| C4 | Load `DATABASE_URL` from env; run `SELECT 1` | done | [x] |
+| C5 | Extend health (or separate check) so DB failure is visible (503) | done | [x] |
+
+**Block C complete 2026-08-10.** `orchestrator/main.py` — FastAPI app, `GET /health`
+runs `SELECT 1` per request and reports real DB state. Acceptance test passed:
+
+| Case | Result |
+|---|---|
+| DB up | `200 {"status":"ok","db":"ok","version":"0.1.0"}` in 0.37s |
+| DB stopped | `503 {"status":"degraded","db":"down","version":"0.1.0"}` in 10.2s |
+| Other route during outage | `/service` still `200` — threadpool not exhausted |
+| DB restarted | `200` again **without restarting uvicorn** |
+
+Two findings worth carrying into M1:
+
+1. **`connect_timeout` is per resolved address, not a total budget.** Set to 5s,
+   measured 10.2s: `localhost` resolves to both `::1` and `127.0.0.1` and libpq
+   applies the timeout to each in turn. Worst case is
+   `connect_timeout × address count`. Size timeouts against that, or connect to
+   a literal IP.
+2. **Without any timeout the endpoint hangs instead of failing.** Docker's port
+   proxy accepts the TCP connection after the container stops but never answers,
+   so libpq waited indefinitely and the `except` was unreachable. Since the route
+   is sync `def`, FastAPI runs it in a threadpool — enough hung requests would
+   exhaust it and take down healthy routes too. Every network call gets a timeout.
 
 > **C1:** `orchestrator/requirements.txt` lists fastapi, uvicorn[standard],
 > psycopg[binary], python-dotenv — **unpinned**. That is the whole of the Python

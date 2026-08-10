@@ -6,7 +6,11 @@
 # so relying on it means a routine ruff upgrade can turn CI red without a
 # single line of project code changing.
 
-target-version = "py312"
+# Keep in lockstep with PYTHON_VERSION in .github/workflows/ci.yml and the
+# interpreter the team actually installs. Ruff uses this to decide which
+# modern-syntax rewrites are legal, so a target ahead of the real interpreter
+# produces suggestions that crash at runtime.
+target-version = "py311"
 
 # Local virtualenvs and caches. Ruff already honours .gitignore; these are
 # listed so a direct `ruff check orchestrator/` on a dev machine behaves the

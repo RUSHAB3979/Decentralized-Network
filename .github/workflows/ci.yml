@@ -16,7 +16,11 @@ permissions:
 
 env:
   NODE_VERSION: '20'
-  PYTHON_VERSION: '3.12'
+  # Matches the founder's local interpreter (3.11.15) and .ruff.toml's
+  # target-version. CI testing a different minor than the one the code is
+  # written on is how "green in CI, broken locally" starts. Bump all three
+  # together or none.
+  PYTHON_VERSION: '3.11'
 
 # Cancel in-progress runs when a newer commit lands on the same ref
 concurrency:
