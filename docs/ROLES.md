@@ -25,6 +25,38 @@ Roles are grouped into three squads:
 
 ---
 
+## Current Engineering Assignments
+
+Assigned 2026-08-10. GitHub handles are the repo collaborators; `.github/CODEOWNERS`
+mirrors this table by path so review requests route automatically.
+
+| Role | Area | Owner(s) |
+|---|---|---|
+| R4 | Security & Sandbox | [@ryujikentaro](https://github.com/ryujikentaro) |
+| R2 | Network & Streaming | [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) |
+| R3 | Cloud / Platform (DevOps) | [@YogitaKanwar](https://github.com/YogitaKanwar), [@RUSHAB3979](https://github.com/RUSHAB3979), [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) |
+| R5 | Backend — Orchestrator | [@YogitaKanwar](https://github.com/YogitaKanwar), [@RUSHAB3979](https://github.com/RUSHAB3979), [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) |
+| R6 | Backend — Provider Agent | [@YogitaKanwar](https://github.com/YogitaKanwar), [@RUSHAB3979](https://github.com/RUSHAB3979), [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) |
+| R9 | Database / Data | [@YogitaKanwar](https://github.com/YogitaKanwar), [@RUSHAB3979](https://github.com/RUSHAB3979), [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) |
+| R8 | Frontend | [@AdarshNarwankar](https://github.com/AdarshNarwankar) |
+
+### Unowned — no name on these yet
+
+Per the rule at the foot of this document, an unowned role is an uncontrolled
+risk. Three engineering roles have no owner:
+
+| Role | Area | Why it is still open |
+|---|---|---|
+| R1 | Distributed Systems Architect | Founder-held by default (see Founder-Hat Mapping). Decides matching, leasing, and state transitions — currently nobody is explicitly accountable for those calls. |
+| R7 | Backend — Payments & Billing | Out of scope until after M0; no payment code exists yet. Assign before Phase 1. |
+| R10 | Site Reliability Engineer | No production surface to keep up yet. Assign before the first external user. |
+
+R4's owner also carries T-01 and T-04, the two risks the register marks as
+platform-killing. That is a lot of blast radius resting on one person; consider a
+second reviewer on security-relevant changes before launch.
+
+---
+
 # SQUAD A — ENGINEERING (Roles 1–10)
 
 ---

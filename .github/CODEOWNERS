@@ -1,0 +1,57 @@
+# Code owners — mirrors the assignment table in docs/ROLES.md (2026-08-10).
+#
+# GitHub requests review from the matching owner automatically when a PR
+# touches these paths. Nothing here BLOCKS a merge: that only happens if
+# "Require review from Code Owners" is turned on in branch protection, which
+# is deliberately off so the team can keep pushing directly to main.
+#
+# Precedence: the LAST matching pattern wins, so the order below is
+# general -> specific. Every owner must have write access or the rule is
+# silently ignored.
+
+# ---------------------------------------------------------------------------
+# Default — unowned paths fall to the founder rather than to nobody
+# ---------------------------------------------------------------------------
+*                               @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# R8 — Frontend: @AdarshNarwankar
+# ---------------------------------------------------------------------------
+/web-client/                    @AdarshNarwankar
+
+# ---------------------------------------------------------------------------
+# R5/R6/R9 — Backend, Provider Agent, Database
+# The Python backend under /orchestrator and /agent is the M0 build target.
+# ---------------------------------------------------------------------------
+/orchestrator/                  @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/agent/                         @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/services/orchestrator/         @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/services/provider-agent/       @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/services/context-server/       @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/packages/contracts/            @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+
+# ---------------------------------------------------------------------------
+# R3 — Cloud / Platform (DevOps)
+# ---------------------------------------------------------------------------
+/.github/                       @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/docker-compose.yml             @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+/.ruff.toml                     @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow
+
+# ---------------------------------------------------------------------------
+# R4 — Security & Sandbox: @ryujikentaro
+# Owns T-01 and T-04, the two risks the register marks platform-killing.
+# The CI workflow is co-owned: DevOps owns the build jobs, Security owns the
+# gitleaks/trivy/SBOM gates that live in the same file.
+# ---------------------------------------------------------------------------
+/.github/workflows/ci.yml       @YogitaKanwar @RUSHAB3979 @Shubh-tech-grow @ryujikentaro
+/docs/RISK-REGISTER.md          @ryujikentaro
+/docs/LEGAL-SECURITY-REQUIREMENTS-INDIA.md  @ryujikentaro
+/docs/SECURITY-LEGAL-EXECUTION-RESEARCH-2026-08.md  @ryujikentaro
+/.env.example                   @ryujikentaro @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# R2 — Network & Streaming: @Shubh-tech-grow
+# WebRTC/TURN/signalling code does not exist yet. Add paths here as it lands
+# rather than pre-declaring directories that would never match.
+# ---------------------------------------------------------------------------
+/docs/solution/SESSION-FLOW.md  @Shubh-tech-grow
