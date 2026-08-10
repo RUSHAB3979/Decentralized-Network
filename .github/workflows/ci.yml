@@ -99,7 +99,7 @@ jobs:
     if: needs.changes.outputs.contracts == 'true'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -124,7 +124,7 @@ jobs:
     if: needs.changes.outputs.orchestrator == 'true'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -157,7 +157,7 @@ jobs:
     if: needs.changes.outputs.agent == 'true'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -193,7 +193,7 @@ jobs:
         working-directory: web-client
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -268,7 +268,7 @@ jobs:
     if: needs.changes.outputs.context == 'true'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install workspace deps
@@ -341,7 +341,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -382,7 +382,7 @@ jobs:
     if: needs.changes.outputs.orchestrator == 'true' || needs.changes.outputs.agent == 'true'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install deps
