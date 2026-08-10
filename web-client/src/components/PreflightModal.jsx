@@ -63,7 +63,7 @@ const PreflightModal = ({ title, onClose, onSessionReady }) => {
         ? SESSION_LIFECYCLE.indexOf(currentState)
         : -1;
     const canLaunch = consentChecked && preflight !== null && preflight.passed && !sessionStarted;
-    return (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    return (<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
       <div className="relative w-full max-w-2xl mx-4 rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl backdrop-blur-xl">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-white/10 px-6 py-5">
@@ -75,7 +75,7 @@ const PreflightModal = ({ title, onClose, onSessionReady }) => {
               Preflight Diagnostic &amp; Session Initiation
             </p>
           </div>
-          <button onClick={onClose} className="ml-4 flex-shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white" aria-label="Close">
+          <button onClick={onClose} className="ml-4 shrink-0 rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-white" aria-label="Close">
             <X className="h-5 w-5"/>
           </button>
         </div>
@@ -116,7 +116,7 @@ const PreflightModal = ({ title, onClose, onSessionReady }) => {
 
           {/* Consent Checkbox */}
           <label className="flex items-start gap-3 cursor-pointer group">
-            <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-offset-slate-900"/>
+            <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)} className="mt-0.5 h-4 w-4 rounded-sm border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-offset-slate-900"/>
             <span className="text-sm text-slate-400 group-hover:text-slate-300 transition-colors leading-relaxed">
               <Shield className="inline h-3.5 w-3.5 mr-1 text-indigo-400 -translate-y-px"/>
               I understand this technical demo runs on dedicated test hardware under controlled
@@ -149,7 +149,7 @@ const PreflightModal = ({ title, onClose, onSessionReady }) => {
                 {SESSION_LIFECYCLE.map((state, idx) => {
                 const isCompleted = currentStateIndex > idx;
                 const isCurrent = currentStateIndex === idx;
-                return (<span key={state} className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono font-medium transition-all duration-300 ${isCompleted
+                return (<span key={state} className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-mono font-medium transition-all duration-300 ${isCompleted
                         ? 'bg-emerald-500/20 text-emerald-400'
                         : isCurrent
                             ? 'bg-indigo-500/20 text-indigo-300 animate-pulse'

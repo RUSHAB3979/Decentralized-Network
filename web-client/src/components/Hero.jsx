@@ -23,7 +23,7 @@ const Hero = () => {
         <LiquidRibbon className="h-full w-full"/>
       </div>
       {/* Bottom fade into page */}
-      <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent to-[#03040c]"/>
+      <div className="absolute inset-x-0 bottom-0 h-48 bg-linear-to-b from-transparent to-[#03040c]"/>
 
       {/* Center composition */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 pt-28 pb-40 text-center">
@@ -31,7 +31,7 @@ const Hero = () => {
           <p className="eyebrow">
             <span className="eyebrow-accent"/>
             Open GPU marketplace
-            <span className="eyebrow-accent !mr-0 ml-4 !bg-gradient-to-l"/>
+            <span className="eyebrow-accent !mr-0 ml-4 !bg-linear-to-l"/>
           </p>
 
           <h1 className="serif-display mt-8 text-[clamp(3.2rem,9vw,7.75rem)] leading-[0.96] text-slate-50" style={{ textShadow: '0 0 80px rgba(103,232,249,0.12)' }}>

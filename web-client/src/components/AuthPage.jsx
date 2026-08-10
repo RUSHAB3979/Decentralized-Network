@@ -73,7 +73,7 @@ const AuthPage = ({ initialMode }) => {
 
         <section className="mx-auto w-full max-w-[490px]">
           <div className="relative overflow-hidden rounded-[28px] border border-white/[0.1] bg-[#090b16]/75 p-6 shadow-[0_32px_100px_rgba(0,0,0,.55)] backdrop-blur-2xl sm:p-9">
-            <div className="absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent"/>
+            <div className="absolute inset-x-12 top-0 h-px bg-linear-to-r from-transparent via-cyan-300/70 to-transparent"/>
             <div className="absolute right-0 top-0 h-32 w-32 rounded-full bg-indigo-400/[0.08] blur-3xl"/>
             <div className="relative">
               <div className="flex items-start justify-between gap-4">
@@ -88,7 +88,7 @@ const AuthPage = ({ initialMode }) => {
               </div>
 
               <div className="mt-7 grid grid-cols-2 rounded-full border border-white/[0.08] bg-black/20 p-1">
-                {['login', 'signup'].map((item) => (<button key={item} type="button" onClick={() => switchMode(item)} className={'rounded-full py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] transition-all ' + (mode === item ? 'bg-white/[0.09] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300')}>
+                {['login', 'signup'].map((item) => (<button key={item} type="button" onClick={() => switchMode(item)} className={'rounded-full py-2.5 text-[11px] font-semibold uppercase tracking-[0.15em] transition-all ' + (mode === item ? 'bg-white/[0.09] text-white shadow-xs' : 'text-slate-500 hover:text-slate-300')}>
                     {item === 'login' ? 'Sign in' : 'Sign up'}
                   </button>))}
               </div>

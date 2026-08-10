@@ -46,7 +46,7 @@ const GameRail = () => (<section id="workloads" className="relative">
                 <span className="font-mono text-[10.5px] uppercase tracking-[0.22em] text-slate-500 transition-colors group-hover:text-slate-300">
                   {workload.action}
                 </span>
-                <span className={`h-10 w-0.5 rounded bg-gradient-to-b ${workload.bar} to-transparent opacity-40 transition-opacity group-hover:opacity-100`}/>
+                <span className={`h-10 w-0.5 rounded-sm bg-linear-to-b ${workload.bar} to-transparent opacity-40 transition-opacity group-hover:opacity-100`}/>
               </div>
             </a>
           </Reveal>);

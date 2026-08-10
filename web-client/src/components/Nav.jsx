@@ -31,7 +31,7 @@ const Nav = () => {
         <div className="hidden md:flex items-center gap-9">
           {LINKS.map(([l, href]) => (<a key={l} href={href} className="group relative text-[13px] font-medium tracking-wide text-slate-400 transition-colors hover:text-slate-100">
               {l}
-              <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-gradient-to-r from-cyan-400 to-violet-400 transition-all duration-300 group-hover:w-full"/>
+              <span className="absolute -bottom-1.5 left-0 h-px w-0 bg-linear-to-r from-cyan-400 to-violet-400 transition-all duration-300 group-hover:w-full"/>
             </a>))}
         </div>
 

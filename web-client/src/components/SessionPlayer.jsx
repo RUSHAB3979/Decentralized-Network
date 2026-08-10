@@ -36,7 +36,7 @@ const SessionPlayer = ({ title, stats, onEndSession, onOpenDebugger }) => {
     }, []);
     return (<div className="space-y-4">
       {/* Top Bar */}
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/80 px-5 py-3 backdrop-blur">
+      <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/80 px-5 py-3 backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
           <span className="relative flex h-3 w-3 shrink-0">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"/>
@@ -133,22 +133,22 @@ const SessionPlayer = ({ title, stats, onEndSession, onOpenDebugger }) => {
 
         {/* Control bar (bottom-right) */}
         <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
-          <button onClick={toggleStats} aria-label="Toggle WebRTC Telemetry Stats" title="Toggle stats" className={`rounded-lg p-2 backdrop-blur transition-colors ${showStats
+          <button onClick={toggleStats} aria-label="Toggle WebRTC Telemetry Stats" title="Toggle stats" className={`rounded-lg p-2 backdrop-blur-sm transition-colors ${showStats
             ? 'bg-indigo-500/20 text-indigo-400 ring-1 ring-indigo-500/30'
             : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'}`}>
             <Gauge className="h-4 w-4"/>
           </button>
-          <button onClick={toggleMute} aria-label={muted ? 'Unmute Audio' : 'Mute Audio'} title={muted ? 'Unmute' : 'Mute'} className={`rounded-lg p-2 backdrop-blur transition-colors ${muted
+          <button onClick={toggleMute} aria-label={muted ? 'Unmute Audio' : 'Mute Audio'} title={muted ? 'Unmute' : 'Mute'} className={`rounded-lg p-2 backdrop-blur-sm transition-colors ${muted
             ? 'bg-red-500/20 text-red-400 ring-1 ring-red-500/30'
             : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'}`}>
             {muted ? <VolumeX className="h-4 w-4"/> : <Volume2 className="h-4 w-4"/>}
           </button>
-          <button onClick={togglePointerLock} aria-label={pointerLocked ? 'Release Pointer Lock' : 'Engage Pointer Lock'} title={pointerLocked ? 'Release pointer' : 'Lock pointer'} className={`rounded-lg p-2 backdrop-blur transition-colors ${pointerLocked
+          <button onClick={togglePointerLock} aria-label={pointerLocked ? 'Release Pointer Lock' : 'Engage Pointer Lock'} title={pointerLocked ? 'Release pointer' : 'Lock pointer'} className={`rounded-lg p-2 backdrop-blur-sm transition-colors ${pointerLocked
             ? 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30'
             : 'bg-slate-800/70 text-slate-400 hover:text-slate-200'}`}>
             <Crosshair className="h-4 w-4"/>
           </button>
-          <button onClick={handleFullscreen} aria-label="Toggle Fullscreen" title="Fullscreen" className="rounded-lg bg-slate-800/70 p-2 text-slate-400 backdrop-blur transition-colors hover:text-slate-200">
+          <button onClick={handleFullscreen} aria-label="Toggle Fullscreen" title="Fullscreen" className="rounded-lg bg-slate-800/70 p-2 text-slate-400 backdrop-blur-sm transition-colors hover:text-slate-200">
             <Maximize2 className="h-4 w-4"/>
           </button>
         </div>

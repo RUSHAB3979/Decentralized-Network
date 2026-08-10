@@ -78,7 +78,7 @@ const NodeTelemetry = () => {
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-sm overflow-hidden">
+      <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 backdrop-blur-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead>

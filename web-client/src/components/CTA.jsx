@@ -6,7 +6,7 @@ const CTA = () => (<section id="cta" className="relative overflow-hidden">
     <div className="hr-fade absolute inset-x-0 top-0 z-10"/>
     <div className="absolute inset-0">
       <LiquidRibbon className="h-full w-full opacity-70"/>
-      <div className="absolute inset-0 bg-gradient-to-b from-[#03040c] via-transparent to-[#03040c]"/>
+      <div className="absolute inset-0 bg-linear-to-b from-[#03040c] via-transparent to-[#03040c]"/>
     </div>
 
     <Reveal className="relative mx-auto max-w-4xl px-6 py-44 text-center sm:px-10">
