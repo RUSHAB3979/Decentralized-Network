@@ -1,6 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss' source(none);
+
+/* Was `content` in tailwind.config.js */
+@source '../index.html';
+@source './**/*.{js,jsx}';
+
+/* Was `darkMode: 'class'` in tailwind.config.js */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Was `theme.extend.fontFamily` in tailwind.config.js */
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
 
 @layer base {
   html {
@@ -11,6 +22,12 @@
     @apply text-slate-100 overflow-x-hidden;
     background: #03040c;
     font-family: 'Space Grotesk', system-ui, sans-serif;
+  }
+
+  /* v4 Preflight dropped the `cursor: pointer` that v3 gave buttons. */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
   }
 
   /* Keep every native dropdown legible against the dark application theme.
@@ -77,7 +94,7 @@
   }
 
   .eyebrow-accent {
-    @apply inline-block h-px w-10 bg-gradient-to-r from-cyan-400/70 to-transparent align-middle mr-4;
+    @apply inline-block h-px w-10 bg-linear-to-r from-cyan-400/70 to-transparent align-middle mr-4;
   }
 
   .text-iridescent {
@@ -118,7 +135,7 @@
   }
 
   .btn-quiet {
-    @apply inline-flex items-center gap-2.5 rounded-full px-8 py-4 text-[13px] font-semibold uppercase tracking-[0.12em] text-slate-200 border border-white/15 bg-white/[0.03] backdrop-blur transition-all hover:border-white/30 hover:bg-white/[0.06] active:scale-[0.97];
+    @apply inline-flex items-center gap-2.5 rounded-full px-8 py-4 text-[13px] font-semibold uppercase tracking-[0.12em] text-slate-200 border border-white/15 bg-white/[0.03] backdrop-blur-sm transition-all hover:border-white/30 hover:bg-white/[0.06] active:scale-[0.97];
   }
 
   .num-mono-huge {
@@ -131,6 +148,13 @@
     @apply flex items-center justify-center gap-2.5 rounded-xl border border-white/[0.09] bg-white/[0.025] py-3 text-xs font-medium text-slate-300 transition-all hover:border-white/[0.18] hover:bg-white/[0.055] hover:text-white active:scale-[0.98];
   }
 
+  /* `label` is inline by default, and inline boxes drop vertical margins — which
+     is how the form's `space-y-4` gaps went missing under v4's `:not(:last-child)`
+     spacing. `.app-field` already does this. */
+  .auth-field {
+    @apply block;
+  }
+
   .auth-field > span {
     @apply mb-2 block text-[10px] font-medium uppercase tracking-[0.17em] text-slate-500;
   }
@@ -140,7 +164,7 @@
   }
 
   .auth-field input {
-    @apply min-w-0 flex-1 bg-transparent py-3.5 text-sm text-slate-100 outline-none placeholder:text-slate-700;
+    @apply min-w-0 flex-1 bg-transparent py-3.5 text-sm text-slate-100 outline-hidden placeholder:text-slate-700;
   }
 
   .app-field {
@@ -153,7 +177,7 @@
 
   .app-field input,
   .app-field select {
-    @apply h-11 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-xs text-slate-300 outline-none transition-colors focus:border-indigo-300/35;
+    @apply h-11 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 text-xs text-slate-300 outline-hidden transition-colors focus:border-indigo-300/35;
   }
 
 }
@@ -183,25 +207,33 @@
   to { transform: translateX(-50%); }
 }
 
-@layer utilities {
-  .bg-grid-blueprint {
-    background-image:
-      linear-gradient(rgba(103, 232, 249, 0.028) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(103, 232, 249, 0.028) 1px, transparent 1px);
-    background-size: 64px 64px;
-  }
+/* v4 registers custom utilities with `@utility`, not `@layer utilities`,
+   so these stay on-demand and keep working with variants. */
+@utility bg-grid-blueprint {
+  background-image:
+    linear-gradient(rgba(103, 232, 249, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(103, 232, 249, 0.028) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
 
-  .mask-fade-y {
-    mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
-  }
+@utility mask-fade-y {
+  mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
+}
 
-  .mask-fade-edges-x {
-    mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
-  }
+@utility mask-fade-edges-x {
+  mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+}
 
-  .animate-float-y { animation: float-y 6s ease-in-out infinite; }
-  .animate-marquee-x { animation: marquee-x 36s linear infinite; }
-  .animate-breathe { animation: breathe 5s ease-in-out infinite; }
+@utility animate-float-y {
+  animation: float-y 6s ease-in-out infinite;
+}
+
+@utility animate-marquee-x {
+  animation: marquee-x 36s linear infinite;
+}
+
+@utility animate-breathe {
+  animation: breathe 5s ease-in-out infinite;
 }
 
 /* Cursor: only hid on fine pointers when glow engine mounts */

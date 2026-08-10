@@ -109,7 +109,7 @@ const InputDebugger = () => {
       {/* Main area: 2 columns on lg */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left: Live event log (2/3) */}
-        <div className="lg:col-span-2 bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+        <div className="lg:col-span-2 bg-slate-900/50 backdrop-blur-xs border border-slate-700/50 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider">
               Live Event Log
@@ -127,11 +127,11 @@ const InputDebugger = () => {
               </p>
             </div>) : (<div className="space-y-1 max-h-[28rem] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
               {logs.map((entry) => (<div key={entry.id} className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg hover:bg-slate-800/80 transition-colors group">
-                  <span className="flex-shrink-0">{typeIcon[entry.type]}</span>
-                  <span className="text-xs font-mono text-slate-500 flex-shrink-0 w-24">
+                  <span className="shrink-0">{typeIcon[entry.type]}</span>
+                  <span className="text-xs font-mono text-slate-500 shrink-0 w-24">
                     {entry.timestamp}
                   </span>
-                  <span className={`text-xs font-mono px-2 py-0.5 rounded border flex-shrink-0 ${typeBadgeColor[entry.type]}`}>
+                  <span className={`text-xs font-mono px-2 py-0.5 rounded-sm border shrink-0 ${typeBadgeColor[entry.type]}`}>
                     {entry.type}
                   </span>
                   <span className="text-sm font-mono text-slate-300 truncate">
@@ -144,7 +144,7 @@ const InputDebugger = () => {
         {/* Right: Safety principles (1/3) */}
         <div className="space-y-4">
           {/* Bounded Input Injection */}
-          <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+          <div className="bg-slate-900/50 backdrop-blur-xs border border-slate-700/50 rounded-xl p-4">
             <div className="flex items-center gap-3 mb-3">
               <div className="p-2 bg-indigo-500/15 rounded-lg">
                 <ShieldAlert className="w-5 h-5 text-indigo-400"/>
@@ -164,7 +164,7 @@ const InputDebugger = () => {
           </div>
 
           {/* Non-Administrator Isolation */}
-          <div className="bg-slate-900/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4">
+          <div className="bg-slate-900/50 backdrop-blur-xs border border-slate-700/50 rounded-xl p-4">
             <div className="flex items-center gap-3 mb-3">
               <div className="p-2 bg-purple-500/15 rounded-lg">
                 <ShieldAlert className="w-5 h-5 text-purple-400"/>

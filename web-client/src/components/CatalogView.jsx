@@ -35,7 +35,7 @@ const rightsBadgeStyles = {
 const CatalogView = ({ titles, onSelectTitle }) => {
     return (<div className="space-y-8">
       {/* Hero Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600/20 via-purple-600/15 to-slate-900 border border-indigo-500/20 p-8 md:p-12">
+      <div className="relative overflow-hidden rounded-2xl bg-linear-to-br from-indigo-600/20 via-purple-600/15 to-slate-900 border border-indigo-500/20 p-8 md:p-12">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-500/10 via-transparent to-transparent"/>
         <div className="relative z-10">
           <div className="inline-flex items-center gap-2 rounded-full bg-indigo-500/15 border border-indigo-400/30 px-4 py-1.5 text-sm font-medium text-indigo-300 mb-4">
@@ -58,21 +58,21 @@ const CatalogView = ({ titles, onSelectTitle }) => {
         {titles.map((title) => {
             const rights = rightsBadgeStyles[title.approval.rights_basis];
             const isBlocked = title.approval.rights_basis === 'blocked';
-            return (<div key={title.id} className="group flex flex-col rounded-xl bg-slate-900/60 backdrop-blur-sm border border-slate-700/50 overflow-hidden hover:border-indigo-500/40 transition-colors duration-300">
+            return (<div key={title.id} className="group flex flex-col rounded-xl bg-slate-900/60 backdrop-blur-xs border border-slate-700/50 overflow-hidden hover:border-indigo-500/40 transition-colors duration-300">
               {/* Cover Image */}
               <div className="relative aspect-video overflow-hidden">
                 <img src={title.cover_url} alt={title.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"/>
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent"/>
+                <div className="absolute inset-0 bg-linear-to-t from-slate-950 via-slate-950/40 to-transparent"/>
 
                 {/* Active Hosts Badge (top-right) */}
-                <div className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 backdrop-blur-sm border border-slate-700/60 px-3 py-1 text-xs font-medium text-slate-200">
+                <div className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 backdrop-blur-xs border border-slate-700/60 px-3 py-1 text-xs font-medium text-slate-200">
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"/>
                   {title.active_hosts_count} Hosts Ready
                 </div>
 
                 {/* Genre Tag + Title (bottom) */}
                 <div className="absolute bottom-3 left-3 right-3">
-                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-800/80 backdrop-blur-sm px-2 py-0.5 text-xs font-medium text-slate-300 mb-2">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-slate-800/80 backdrop-blur-xs px-2 py-0.5 text-xs font-medium text-slate-300 mb-2">
                     <Layers className="h-3 w-3"/>
                     {title.genre}
                   </span>
@@ -123,7 +123,7 @@ const CatalogView = ({ titles, onSelectTitle }) => {
 
               {/* Footer */}
               <div className="p-4 pt-0">
-                <button type="button" onClick={() => onSelectTitle(title)} disabled={isBlocked} className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${isBlocked
+                <button type="button" onClick={() => onSelectTitle(title)} disabled={isBlocked} className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${isBlocked
                     ? 'bg-slate-800 text-amber-400 opacity-80 cursor-not-allowed border border-amber-500/30'
                     : 'bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-600'}`}>
                   {isBlocked ? (<>

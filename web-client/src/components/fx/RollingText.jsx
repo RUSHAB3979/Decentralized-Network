@@ -17,7 +17,7 @@ const RollingText = ({ words, className = '', interval = 2600 }) => {
       {words.map((word, i) => {
             const active = i === idx;
             const prev = (idx - 1 + words.length) % words.length === i;
-            return (<span key={word} className="absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-violet-400 to-cyan-300" style={{
+            return (<span key={word} className="absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent bg-linear-to-r from-indigo-400 via-violet-400 to-cyan-300" style={{
                     transform: active ? 'translateY(0)' : prev ? 'translateY(-110%)' : 'translateY(110%)',
                     opacity: active ? 1 : 0,
                     transition: 'transform 0.6s cubic-bezier(0.76, 0, 0.24, 1), opacity 0.4s',
