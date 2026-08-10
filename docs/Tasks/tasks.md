@@ -22,7 +22,7 @@
 | **Phase** | Phase 0 (Foundations) → edge of Phase 1 |
 | **Started** | 2026-07-15 |
 | **Timebox** | **2026-08-24** — decision point, not a hard deadline |
-| **Progress** | 6 of 23 tasks verified done |
+| **Progress** | **20 of 23 tasks done — DoD 7 of 7. M0 is complete.** |
 
 **What the timebox means.** On 2026-08-24, if M0 is not done, `orchestrator/`
 transfers to [@YogitaKanwar](https://github.com/YogitaKanwar) and the founder
@@ -48,10 +48,10 @@ Three of the four collaborators are blocked behind this endpoint.
 - [x] Docker Postgres is running on Windows (Docker Desktop)
 - [x] Orchestrator starts and `GET /health` returns success (browser, curl, or Invoke-WebRequest)
 - [x] Orchestrator can talk to Postgres (`SELECT 1` or health reports `db: ok`)
-- [ ] Agent starts, reads orchestrator URL from env, hits `/health`, logs reachable
+- [x] Agent starts, reads orchestrator URL from env, hits `/health`, logs reachable
 - [x] `.gitignore` excludes venv, `.env`, `__pycache__`, IDE junk
 - [x] `.env.example` documents required vars (no real secrets committed)
-- [ ] `README.md` explains how to run DB, orchestrator, and agent on Windows
+- [x] `README.md` explains how to run DB, orchestrator, and agent on Windows
 
 **Out of scope for M0:** auth, register/heartbeat tables, catalog, WebRTC, C++, payments.
 
@@ -74,11 +74,12 @@ not verifiable from the repo — tick it after checking on the machine).
 | A2 | Add `.gitignore` (Python, venv, `.env`, Windows/IDE) | done | [x] |
 | A3 | Add `.env.example` (`DATABASE_URL`, `ORCHESTRATOR_URL` placeholders) | done | [x] |
 | A4 | Add root `README.md` (what / how to run — can be stub first) | done | [x] |
-| A5 | Create folders: `orchestrator/`, `agent/` (and optional `docs/`) | in_progress | [ ] |
+| A5 | Create folders: `orchestrator/`, `agent/` (and optional `docs/`) | done | [x] |
 
-> **A5:** `orchestrator/` is tracked (`requirements.txt`). `agent/` exists on disk
-> but is empty, and git does not track empty directories — so it does not exist
-> for anyone who clones. It closes when D1 puts a file in it.
+> **A5 closed 2026-08-10** when `agent/main.py` and `agent/requirements.txt`
+> were committed. Until then `agent/` existed on disk but not in git — git does
+> not track empty directories, so for anyone cloning the repo it did not exist
+> at all. A directory only becomes real when it has a tracked file in it.
 
 ---
 
@@ -155,11 +156,41 @@ validation trap costs an hour if you meet it as a bug instead of a note.
 
 | ID | Task | Status | Done |
 |----|------|--------|------|
-| D1 | Create agent package + venv (or shared workspace venv — document choice) | pending | [ ] |
-| D2 | Read `ORCHESTRATOR_URL` from env | pending | [ ] |
-| D3 | HTTP GET `{ORCHESTRATOR_URL}/health` | pending | [ ] |
-| D4 | Log clear success / failure (exit non-zero on failure is a plus) | pending | [ ] |
-| D5 | Update README with exact Windows run steps for all three pieces | pending | [ ] |
+| D1 | Create agent package + venv (or shared workspace venv — document choice) | done | [x] |
+| D2 | Read `ORCHESTRATOR_URL` from env | done | [x] |
+| D3 | HTTP GET `{ORCHESTRATOR_URL}/health` | done | [x] |
+| D4 | Log clear success / failure (exit non-zero on failure is a plus) | done | [x] |
+| D5 | Update README with exact Windows run steps for all three pieces | done | [x] |
+
+**Block D complete 2026-08-10.** `agent/main.py` reads `ORCHESTRATOR_URL`, calls
+`GET /health`, and distinguishes the three states a caller has to tell apart:
+
+| What happened | What it means | Exit |
+|---|---|---|
+| `200` | Everything works | `0` |
+| Response, status `503` | Orchestrator up, **its database is down** | `1` |
+| `httpx.RequestError` | Orchestrator unreachable | `1` |
+
+All three verified by inducing each failure — DB stopped, then uvicorn stopped.
+
+**Choice recorded for D1: the agent gets its own venv** (`agent/env`), not a
+shared one. `agent/requirements.txt` is `httpx` + `python-dotenv` and nothing
+else. The dependency list is a security boundary, not just a build input: the
+agent installs on a provider's own machine, and shipping `psycopg` there would
+imply the agent can reach our database. It cannot, and it never should.
+
+Three findings from Block D:
+
+1. **A client timeout shorter than the server's worst case hides the error you
+   built.** The agent's 5s timeout fired before the orchestrator's ~10s `503`
+   arrived, so the `else` branch looked correct and had never once executed.
+   Raised to 15s. Test the failure branch, or assume it doesn't work.
+2. **`sys.exit(1)` gets forgotten on the path written last.** The `except`
+   branch printed a failure and exited `0` — a monitor reporting green while
+   the orchestrator was down. Exit codes are the only part a scheduler reads.
+3. **Refused (`WinError 10061`) and silent (`ReadTimeout`) are different
+   diagnoses.** Refused means the process is dead; silence means it is alive
+   and stuck. Collapsing both into "error" throws away the useful half.
 
 > Block D is the hand-off point. Once `agent/` has a file in it, the directory
 > belongs to [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) (R6) and the
@@ -175,7 +206,7 @@ arrived first, so the title is retired; the tasks are still worth doing.
 
 | ID | Task | Status | Done | Owner |
 |----|------|--------|------|-------|
-| E1 | Pin dependencies (`requirements.txt` or `pyproject.toml`) | pending | [ ] | R1 |
+| E1 | Pin dependencies (`requirements.txt` or `pyproject.toml`) | done | [x] | R1 |
 | E2 | Short ADR: hybrid architecture, Python now / C++ later | pending | [ ] | R1 |
 | E3 | Short ADR: BYOL + allowlist legal model | pending | [ ] | R4 |
 | E4 | Domain notes: list entities User / ProviderNode / Session | pending | [ ] | R9 |
@@ -208,6 +239,8 @@ split in TEAM-EXECUTION-PLAN.md §7.
 | Date | Note |
 |------|------|
 | 2026-07-15 | Task file created. M0 hard deadline set to 2026-07-17 EOD. |
+| 2026-08-10 | **M0 code complete — 14 days inside the 2026-08-24 timebox.** Blocks C and D finished: orchestrator `/health` reports real Postgres state, agent distinguishes three failure modes with exit codes, README rewritten for the Python stack. Awaiting @YogitaKanwar's clean-clone verification for sign-off. |
+| 2026-08-10 | **`main` went red for ~2.5h.** PR #9, labelled a dev-dependency group bump, carried three majors including `tailwindcss` 3→4, whose PostCSS plugin moved packages. It was merged by hand while its own CI was already failing, which broke every open PR — `pull_request` checks build each branch merged with `main`. Fixed in #13 by reverting Tailwind only; v4 migration tracked in #14. Lesson: a red Dependabot PR is the cheapest bug report you will ever get. |
 | 2026-08-10 | **Tracker was stale by 24 days** — all 23 tasks read `pending` while A1–A4 and B2 were done. Audited against the repo, statuses corrected, expired deadlines replaced with a 2026-08-24 timebox. Four collaborators onboarded; roles assigned in ROLES.md, paths in CODEOWNERS, execution in TEAM-EXECUTION-PLAN.md. |
 
 <!-- Add a line each session. -->
