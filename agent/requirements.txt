@@ -1,0 +1,16 @@
+# Provider agent dependencies.
+#
+# This list is deliberately short, and it is a security boundary as much as a
+# build input. The agent runs on a provider's own machine — a stranger's gaming
+# PC — so anything listed here is something we have shipped onto hardware we do
+# not control.
+#
+# In particular: no database driver, ever. The agent talks to the orchestrator
+# over HTTP and nothing else. If psycopg shows up in this file, the design has
+# gone wrong upstream of the file.
+#
+# Pinned exactly (==) so every provider machine resolves the same tree. Bumps
+# come through Dependabot.
+
+httpx==0.28.1
+python-dotenv==1.2.2
