@@ -41,7 +41,7 @@ Execution detail — first tasks, sequencing, and clash rules — lives in
 | [@YogitaKanwar](https://github.com/YogitaKanwar) | **R3** Cloud/Platform + **R9** Database → **R5** after M0 | `.github/`, `docker-compose.yml`, schema + migrations — task list: [yogitatasks.md](./yogitatasks.md) |
 | [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, streaming/TURN, telemetry |
 | [@ryujikentaro](https://github.com/ryujikentaro) | **R4** Security & Sandbox + **R10** SRE | Threat model, sandbox, CI security gates, runbooks |
-| [@AdarshNarwankar](https://github.com/AdarshNarwankar) | **R8** Frontend + **R7** Payments *(when it starts)* | `web-client/` |
+| [@AdarshNarwankar](https://github.com/AdarshNarwankar) | **R8** Frontend + **R7** Payments *(when it starts)* | `web-client/` — task list: [adarshtasks.md](./adarshtasks.md) |
 
 ### Why this shape
 
