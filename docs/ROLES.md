@@ -25,6 +25,58 @@ Roles are grouped into three squads:
 
 ---
 
+## Current Engineering Assignments
+
+Assigned 2026-08-10, redistributed the same day (see below). GitHub handles are
+the repo collaborators; `.github/CODEOWNERS` mirrors this table by path so review
+requests route automatically. **If this table and CODEOWNERS ever disagree,
+CODEOWNERS wins and this table is the bug.**
+
+Execution detail — first tasks, sequencing, and clash rules — lives in
+[TEAM-EXECUTION-PLAN.md](./TEAM-EXECUTION-PLAN.md).
+
+| Owner | Roles | Primary surface |
+|---|---|---|
+| [@RUSHAB3979](https://github.com/RUSHAB3979) | **R1** Architect + **R5** Orchestrator *(M0 only)* | `orchestrator/`, `packages/contracts/`, all interface decisions |
+| [@YogitaKanwar](https://github.com/YogitaKanwar) | **R3** Cloud/Platform + **R9** Database → **R5** after M0 | `.github/`, `docker-compose.yml`, schema + migrations |
+| [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, streaming/TURN, telemetry |
+| [@ryujikentaro](https://github.com/ryujikentaro) | **R4** Security & Sandbox + **R10** SRE | Threat model, sandbox, CI security gates, runbooks |
+| [@AdarshNarwankar](https://github.com/AdarshNarwankar) | **R8** Frontend + **R7** Payments *(when it starts)* | `web-client/` |
+
+### Why this shape
+
+The first cut put three names on every backend role and one name on frontend.
+Measured against the actual repository that was backwards: `web-client/src` is
+4,299 lines and `orchestrator/` is 3, so the "small" role was the only one with
+real code in it and the "big" ones were co-owned placeholders.
+
+Two rules replaced it:
+
+1. **One primary owner per surface.** Three names on a path means the review
+   notification is everyone's job and therefore nobody's.
+2. **Pair roles that share a machine or a lifecycle.** The agent and the network
+   both run on the provider's box. The database and the infrastructure that
+   starts it are one problem. Security and reliability share their runbooks.
+
+`packages/contracts/` stays with R1 even after `orchestrator/` hands over,
+because an interface change is a decision that breaks four surfaces at once.
+
+### Now owned, previously open
+
+- **R1** — explicitly founder-held rather than implied by the Founder-Hat
+  Mapping. Someone is accountable for matching, leasing, and state transitions.
+- **R10** — folded into R4. No production surface exists yet, but the person who
+  will be paged is the person who wrote the sandbox.
+- **R7** — parked with R8's owner. No payment code exists; the name is there so
+  it does not get discovered unowned at Phase 1.
+
+R4's owner carries T-01 and T-04, the two risks the register marks as
+platform-killing. That is a lot of blast radius resting on one person; add a
+second reviewer on security-relevant changes before launch
+(TEAM-EXECUTION-PLAN.md risk P-6).
+
+---
+
 # SQUAD A — ENGINEERING (Roles 1–10)
 
 ---

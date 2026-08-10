@@ -1,0 +1,78 @@
+# Code owners — mirrors the assignment table in docs/ROLES.md and
+# docs/TEAM-EXECUTION-PLAN.md §3 (2026-08-10).
+#
+# GitHub requests review from the matching owner automatically when a PR
+# touches these paths. Nothing here BLOCKS a merge: that only happens if
+# "Require review from Code Owners" is turned on in branch protection, which
+# is deliberately off so the team can keep pushing directly to main.
+#
+# Precedence: the LAST matching pattern wins, so the order below is
+# general -> specific. Every owner must have write access or the rule is
+# silently ignored.
+#
+# ONE PRIMARY OWNER PER PATH. Co-ownership was tried and removed: three names
+# on a path means the review notification is everyone's job and therefore
+# nobody's. Where a second name appears below it is a deliberate cross-check
+# (security, or an interface the architect must approve), not shared custody.
+
+# ---------------------------------------------------------------------------
+# Default — unowned paths fall to the founder rather than to nobody
+# ---------------------------------------------------------------------------
+*                               @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# R8 — Frontend: @AdarshNarwankar
+# R7 Payments joins here when that work starts; no paths exist for it yet.
+# ---------------------------------------------------------------------------
+/web-client/                    @AdarshNarwankar
+
+# ---------------------------------------------------------------------------
+# R1 — Architecture / interfaces: @RUSHAB3979
+# Contract changes are decisions, not implementations. They stay with R1 even
+# after /orchestrator hands over, because a shape change breaks four surfaces
+# at once.
+# ---------------------------------------------------------------------------
+/packages/contracts/            @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# R5 — Orchestrator: @RUSHAB3979 (M0 only)
+# Transfers to @YogitaKanwar at the M0 decision point — see
+# docs/TEAM-EXECUTION-PLAN.md §7. Update this block on the day it fires.
+# ---------------------------------------------------------------------------
+/orchestrator/                  @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# R6 / R2 — Provider Agent, Network & Streaming: @Shubh-tech-grow
+# Both live on the provider's machine, so they are one surface.
+# WebRTC/TURN/signalling code does not exist yet; add paths as it lands rather
+# than pre-declaring directories that would never match.
+# ---------------------------------------------------------------------------
+/agent/                         @Shubh-tech-grow
+/docs/solution/SESSION-FLOW.md  @Shubh-tech-grow
+
+# ---------------------------------------------------------------------------
+# R3 / R9 — Cloud, Platform, Database: @YogitaKanwar
+# The infrastructure and the database it runs are deliberately one owner.
+# ---------------------------------------------------------------------------
+/.github/                       @YogitaKanwar
+/docker-compose.yml             @YogitaKanwar
+/.ruff.toml                     @YogitaKanwar
+
+# ---------------------------------------------------------------------------
+# R4 / R10 — Security, Sandbox, SRE: @ryujikentaro
+# Owns T-01 and T-04, the two risks the register marks platform-killing.
+# ci.yml is the one genuinely co-owned file: DevOps owns the build jobs,
+# Security owns the gitleaks/trivy/SBOM gates that live in the same file.
+# ---------------------------------------------------------------------------
+/.github/workflows/ci.yml       @YogitaKanwar @ryujikentaro
+/docs/RISK-REGISTER.md          @ryujikentaro
+/docs/LEGAL-SECURITY-REQUIREMENTS-INDIA.md  @ryujikentaro
+/docs/SECURITY-LEGAL-EXECUTION-RESEARCH-2026-08.md  @ryujikentaro
+/.env.example                   @ryujikentaro @RUSHAB3979
+
+# ---------------------------------------------------------------------------
+# Frozen — the TypeScript reference implementation
+# Read-only contract reference until the Python port reaches parity. Reviews
+# route to R1 so that "why are you editing frozen code?" gets asked.
+# ---------------------------------------------------------------------------
+/services/                      @RUSHAB3979
