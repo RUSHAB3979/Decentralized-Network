@@ -362,7 +362,7 @@ jobs:
 
       - name: Upload Trivy results to GitHub Security
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true  # No findings = empty SARIF = upload may noop without hard-failing
         with:
           sarif_file: 'trivy-results.sarif'
