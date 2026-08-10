@@ -40,7 +40,7 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       context: ${{ steps.filter.outputs.context }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # SHA-pinned: this is third-party and it reads the repo through the API
       # with the workflow token. A moved tag would run unreviewed code here.
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.2
@@ -94,7 +94,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -119,7 +119,7 @@ jobs:
     needs: [changes, contracts]
     if: needs.changes.outputs.orchestrator == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -152,7 +152,7 @@ jobs:
     needs: [changes, contracts]
     if: needs.changes.outputs.agent == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -188,7 +188,7 @@ jobs:
       run:
         working-directory: web-client
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -209,7 +209,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -263,7 +263,7 @@ jobs:
     needs: [changes, contracts]
     if: needs.changes.outputs.context == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -296,7 +296,7 @@ jobs:
       PROVIDER_ID: ci-provider
       ORCHESTRATOR_URL: http://orchestrator:8080
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Validate docker-compose (full render + schema check)
         run: docker compose config --quiet
       - name: Build compose services
@@ -319,7 +319,7 @@ jobs:
                               # without this, checkout gets a tokenless fetch -> "repository not found"
       security-events: write  # For SARIF upload
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Full history needed for secrets scan
 
@@ -377,7 +377,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.orchestrator == 'true' || needs.changes.outputs.agent == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
