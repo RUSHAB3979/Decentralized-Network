@@ -22,11 +22,12 @@ from pathlib import Path
 
 import httpx
 
-DEFAULT_HOST = "http://127.0.0.1:11434"
+# Single definition, in agent/winproc.py, along with the explanation of why a
+# windowed app has to pass it. This module had its own copy and telemetry.py
+# had none, which is exactly how the console flash came back.
+from agent.winproc import CREATE_NO_WINDOW
 
-# Without this, 'ollama serve' flashes a console window on every launch. The
-# app is meant to sit in the tray unnoticed.
-CREATE_NO_WINDOW = 0x08000000
+DEFAULT_HOST = "http://127.0.0.1:11434"
 
 
 class OllamaError(RuntimeError):
@@ -105,10 +106,25 @@ class OllamaSupervisor:
         raise OllamaError(f"Ollama did not become reachable within {deadline_s:.0f}s")
 
     def models(self) -> list[str]:
-        """Names of locally available models."""
+        """Names of models whose weights are actually on this machine.
+
+        `/api/tags` also lists Ollama Cloud models, which are ~400-byte
+        pointers carrying a `remote_host` key. They are not local capacity: a
+        request routed to one is proxied to ollama.com on the provider's own
+        account. Returning them from a method documented as "local" is how a
+        node ends up advertising capacity it does not have, so the filter is
+        here rather than at each call site.
+
+        This is a locality filter, not model-residency logic. It says the
+        weights exist on disk, not that they are loaded, warm, or servable
+        within any deadline. Residency is hand-built (ADR 0002) and this must
+        not be used as a scheduling input in its place.
+        """
         response = httpx.get(f"{self.host}/api/tags", timeout=30)
         response.raise_for_status()
-        return [m["name"] for m in response.json().get("models", [])]
+        return [
+            m["name"] for m in response.json().get("models", []) if not m.get("remote_host")
+        ]
 
     def stop(self, grace_s: float = 10.0) -> None:
         """Stop the server, unless the provider was already running it."""

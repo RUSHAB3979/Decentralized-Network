@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Deliberately no Google Fonts link, unlike index.html. This page is loaded
+      from disk inside a desktop window that must render identically on a
+      machine with no internet connection, and a remote font would either block
+      first paint or silently fall back. The stack below is what Windows
+      already has.
+    -->
+    <title>GPU Provider</title>
+    <style>
+      html { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif; }
+      body { background: #08090a; }
+      /* The window is chrome-less by design; a visible scrollbar track fights
+         that, so keep the thumb and drop the rest. */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+    </style>
+    <script type="module" crossorigin src="./assets/desktop-NbAgxxHx.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/desktop-BH2ejSex.css">
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+  </body>
+</html>

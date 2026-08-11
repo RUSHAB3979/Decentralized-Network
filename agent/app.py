@@ -4,17 +4,19 @@ Run it from the repository root:
 
     python -m agent.app
 
-What v1 does: finds or starts Ollama, watches that it stays up, and shows the
-node's status in the system tray with a control to stop accepting new work.
+What it does: finds or starts Ollama, watches that it stays up, shows the
+node's status in the system tray with a control to stop accepting new work,
+and (M1) registers with the orchestrator and heartbeats its telemetry there.
 
-What v1 deliberately does not do: talk to the orchestrator. Enrolment, leases
-and metering live in agent/core/, they are hand-built per ADR 0002, and they
-are not stubbed into the boot path here. That is the point - the app runs and
-can be tested today without them, so they get written carefully rather than
-under pressure to make the thing start.
+What it deliberately still does not do: leases, metering, or credentials.
+Those live in agent/core/, they are hand-built per ADR 0002, and they are not
+stubbed into the boot path here. The M1 heartbeat does not need them - it
+carries a public node id and no proof of identity, which is a decision written
+down in docs/adr/0004-m1-unauthenticated-heartbeat.md rather than an oversight.
 
-Threading: pystray owns the main thread on Windows, so supervision runs on a
-worker and the two communicate only through agent.state.ProviderState.
+Threading: pywebview owns the main thread on Windows, so supervision and
+reporting run on workers. Nothing is shared between them except
+agent.state.ProviderState, which is the only object in the app with a lock.
 """
 
 from __future__ import annotations
@@ -22,9 +24,12 @@ from __future__ import annotations
 import sys
 import threading
 
+from dotenv import load_dotenv
+
+from agent import reporter
 from agent.runtime.ollama import OllamaError, OllamaSupervisor
 from agent.state import ProviderState, Status
-from agent.ui import tray
+from agent.ui import tray, window
 
 # Slow enough to be free, fast enough that a provider who kills Ollama sees the
 # tray go red before they wonder whether the app noticed.
@@ -66,6 +71,11 @@ def _supervise(
 
 
 def main() -> int:
+    # Reads ORCHESTRATOR_URL from a .env beside the repository when running
+    # from source. The packaged app has no .env, which is why reporter.py
+    # carries a working default rather than requiring the variable.
+    load_dotenv()
+
     state = ProviderState()
     supervisor = OllamaSupervisor()
     accepting = threading.Event()
@@ -80,6 +90,17 @@ def main() -> int:
     )
     worker.start()
 
+    # Separate thread from the supervisor on purpose. Reporting is network I/O
+    # against a machine we do not control, and a slow orchestrator must never
+    # be able to delay noticing that Ollama died locally.
+    telemetry_reporter = threading.Thread(
+        target=reporter.run,
+        args=(state, stop),
+        name="reporter",
+        daemon=True,
+    )
+    telemetry_reporter.start()
+
     def on_drain_change(should_accept: bool) -> None:
         accepting.set() if should_accept else accepting.clear()
         # Reflect the click immediately instead of waiting out the poll
@@ -90,15 +111,37 @@ def main() -> int:
         else:
             state.set(Status.DRAINING, "not accepting new work")
 
+    dashboard = window.build(state, on_drain_change)
+
     def on_quit() -> None:
         stop.set()
         worker.join(timeout=5)
+        # Bounded like the supervisor join. Both threads are daemons, so a
+        # request still in flight cannot hold the process open past this; the
+        # orchestrator will age the node out via TTL rather than being told.
+        # A clean deregister is a later milestone - it needs a credential,
+        # or anyone could deregister anyone.
+        telemetry_reporter.join(timeout=5)
         # Only stops a server this process started; an Ollama the provider was
         # already running is left alone. See runtime/ollama.py.
         supervisor.stop()
         state.set(Status.STOPPED, "")
+        # Ends the GUI loop below. Without this the process survives the tray
+        # being quit, because webview.start() is still holding the main thread.
+        dashboard.destroy()
 
-    tray.build(state, on_drain_change, on_quit).run()
+    icon = tray.build(state, on_drain_change, on_quit, on_open=dashboard.show)
+    icon.run_detached()
+
+    # Blocks the main thread until on_quit destroys the window. The window is
+    # created hidden and shown here, once the GUI loop is actually running -
+    # showing it before that races the loop and can paint an empty frame.
+    #
+    # Launching straight to the dashboard is right while a human is starting
+    # this by hand. Once the app auto-starts at login it should come up in the
+    # tray instead, which is a flag this does not have yet.
+    window.run(dashboard, on_started=dashboard.show)
+    icon.stop()
     return 0
 
 

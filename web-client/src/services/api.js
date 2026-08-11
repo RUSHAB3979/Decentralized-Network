@@ -69,68 +69,10 @@ export const MOCK_CATALOG = [
         },
     },
 ];
-// ---------------------------------------------------------------------------
-// Mock provider nodes — 3 nodes
-// ---------------------------------------------------------------------------
-export const MOCK_NODES = [
-    {
-        node_id: 'node-us-east-01',
-        name: 'US-East Primary',
-        state: 'online_idle',
-        region: 'us-east-1',
-        ping_ms: 18,
-        host_class: 'dedicated_test_machine',
-        last_heartbeat_at: new Date(Date.now() - 4000).toISOString(),
-        telemetry: {
-            gpu_name: 'NVIDIA GeForce RTX 4090',
-            driver_version: '560.94',
-            gpu_utilization_pct: 12,
-            vram_used_gb: 3.2,
-            vram_total_gb: 24,
-            temp_celsius: 42,
-            power_draw_watts: 85,
-            fan_speed_pct: 30,
-        },
-    },
-    {
-        node_id: 'node-eu-west-01',
-        name: 'EU-West Frankfurt',
-        state: 'streaming',
-        region: 'eu-west-1',
-        ping_ms: 34,
-        host_class: 'managed_fleet',
-        last_heartbeat_at: new Date(Date.now() - 2000).toISOString(),
-        telemetry: {
-            gpu_name: 'NVIDIA GeForce RTX 3080',
-            driver_version: '555.85',
-            gpu_utilization_pct: 78,
-            vram_used_gb: 7.4,
-            vram_total_gb: 10,
-            temp_celsius: 71,
-            power_draw_watts: 285,
-            fan_speed_pct: 68,
-        },
-    },
-    {
-        node_id: 'node-ap-south-01',
-        name: 'AP-South Mumbai',
-        state: 'online_idle',
-        region: 'ap-south-1',
-        ping_ms: 52,
-        host_class: 'trusted_partner',
-        last_heartbeat_at: new Date(Date.now() - 8000).toISOString(),
-        telemetry: {
-            gpu_name: 'NVIDIA GeForce RTX 4080',
-            driver_version: '560.94',
-            gpu_utilization_pct: 5,
-            vram_used_gb: 1.8,
-            vram_total_gb: 16,
-            temp_celsius: 38,
-            power_draw_watts: 62,
-            fan_speed_pct: 25,
-        },
-    },
-];
+// MOCK_NODES lived here. It was three invented gaming hosts with fluctuating
+// temperatures, and it was deleted in M1 rather than kept as a fallback -- see
+// fetchProviderNodes() below for why a fallback would have been worse than
+// nothing.
 // ---------------------------------------------------------------------------
 // Health check — tries the real orchestrator, falls back to mock
 //
@@ -155,6 +97,65 @@ export async function checkOrchestratorHealth() {
     }
     catch {
         return { status: 'unreachable', db: 'mock', version: '0.1.0-mock' };
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}
+// ---------------------------------------------------------------------------
+// Provider nodes — real data from the orchestrator, or an explicit failure
+//
+// Note the difference from checkOrchestratorHealth above, which falls back to a
+// mock object. That is fine for a status pill: 'unreachable' is visibly not a
+// real health result. It is not fine here.
+//
+// If this returned an empty array when the request failed, the page would show
+// "0 providers online" — a confident, specific, wrong answer that is
+// indistinguishable from a genuinely empty marketplace. Nothing would throw and
+// nobody would investigate. So the failure is returned as a value the caller is
+// forced to handle, and the UI renders "cannot reach the orchestrator" instead
+// of inventing a fleet size.
+//
+// The same reasoning is why the mock nodes were deleted rather than kept as a
+// fallback: a marketplace that displays three fictional RTX 4090s when the
+// backend is down is worse than one that displays an error.
+// ---------------------------------------------------------------------------
+export async function fetchProviderNodes({ timeoutMs = 5000 } = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(`${ORCHESTRATOR_URL}/providers/nodes`, {
+            signal: controller.signal,
+        });
+        if (!res.ok) {
+            // 503 means the orchestrator is up but its registry is not. That
+            // is a different problem from an unreachable orchestrator, and
+            // whoever is debugging needs to be told which one it is.
+            const detail = await res.text().catch(() => '');
+            return {
+                ok: false,
+                error: res.status === 503
+                    ? 'The orchestrator cannot reach the provider registry.'
+                    : `Orchestrator returned ${res.status}.`,
+                detail,
+            };
+        }
+        const body = await res.json();
+        return {
+            ok: true,
+            nodes: body.nodes ?? [],
+            ttlSeconds: body.ttl_seconds ?? null,
+            serverTime: body.server_time ?? null,
+        };
+    }
+    catch (err) {
+        return {
+            ok: false,
+            error: err?.name === 'AbortError'
+                ? `No response from the orchestrator within ${timeoutMs}ms.`
+                : 'Cannot reach the orchestrator.',
+            detail: String(err?.message ?? err),
+        };
     }
     finally {
         clearTimeout(timeout);

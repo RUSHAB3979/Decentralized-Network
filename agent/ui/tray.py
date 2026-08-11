@@ -43,8 +43,14 @@ def build(
     state: ProviderState,
     on_drain_change: Callable[[bool], None],
     on_quit: Callable[[], None],
+    on_open: Callable[[], None] | None = None,
 ) -> pystray.Icon:
-    """Build the tray icon. Call .run() on the main thread to show it."""
+    """Build the tray icon.
+
+    Call .run_detached() rather than .run(): pywebview needs the Windows main
+    thread and pystray does not, so the dashboard gets it and the tray runs
+    alongside. See agent/ui/window.py.
+    """
 
     def accepting() -> bool:
         return state.status.accepts_work
@@ -56,10 +62,17 @@ def build(
         on_quit()
         icon.stop()
 
+    def open_dashboard(icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        if on_open is not None:
+            on_open()
+
     menu = pystray.Menu(
         # Disabled, so it reads as a status line rather than something to click.
         pystray.MenuItem(lambda item: str(state), None, enabled=False),
         pystray.Menu.SEPARATOR,
+        # default=True makes this the double-click action, which is what people
+        # try first on a tray icon before they ever find the menu.
+        pystray.MenuItem("Open dashboard", open_dashboard, default=True),
         pystray.MenuItem(
             "Accept new work",
             toggle_accepting,

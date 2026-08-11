@@ -120,10 +120,21 @@ py -3.11 -m venv orchestrator\env
 Every time:
 
 ```powershell
-.\orchestrator\env\Scripts\python.exe -m uvicorn main:app --reload --port 8080 --app-dir orchestrator
+.\orchestrator\env\Scripts\python.exe -m uvicorn orchestrator.main:app --reload --port 8080
 ```
 
 Leave it running. `--reload` restarts it when you edit a file.
+
+> Run this from the **repository root**, not from inside `orchestrator\`. It
+> used to be `main:app --app-dir orchestrator`; M1 split the orchestrator into
+> several modules that import each other, so it is now a package, like `agent`
+> already was. `--app-dir` would put `orchestrator\` itself on the path and the
+> intra-package imports would fail.
+
+On boot it creates the `provider_nodes` table if it is missing and prints
+`[orchestrator] schema applied`. If the database is down it says so and starts
+anyway — `/health` will report `degraded` and the provider endpoints return
+`503` until Postgres is back.
 
 Check it from a **second** terminal:
 
@@ -182,6 +193,67 @@ Those three cases are different failures and the agent reports them
 differently on purpose. `503` means the orchestrator is alive and *its*
 database is gone. `10061` means the orchestrator process itself isn't there.
 An agent that collapses both into "error" tells you nothing at 2am.
+
+### 6. Enrol this machine as a provider (M1)
+
+`agent\main.py` above is the M0 probe: one health check, then it exits. The
+real provider app registers itself and then reports in on a loop.
+
+```powershell
+.\agent\env\Scripts\python.exe -m agent.app
+```
+
+It starts Ollama if it is not already running, puts an icon in the system
+tray, opens the dashboard, and starts a `reporter` thread that calls
+`POST /providers/register` once and `POST /providers/heartbeat` every 15
+seconds. Watch the console for:
+
+```
+[reporter] registered b206e1c7… with http://localhost:8080 (heartbeat every 15s)
+```
+
+Then look at the registry:
+
+```powershell
+(Invoke-RestMethod http://localhost:8080/providers/nodes).nodes |
+  Select-Object hostname, liveness, accepts_work, last_heartbeat_at
+```
+
+The same data drives the **Nodes** tab of the provider console in
+`web-client` (`npm run dev`, then `/app/provider`). There is no mock behind it
+any more — if the orchestrator is down the page says so rather than showing
+invented hardware.
+
+**Things worth knowing before you debug it:**
+
+- `liveness` is computed from `last_heartbeat_at` on every read, never stored.
+  A node goes `offline` after `PROVIDER_TTL_MS` (default 120s) with no
+  heartbeat, and `never_seen` means it registered but its heartbeat loop never
+  ran — a broken agent, not a sleeping machine.
+- The node id lives in `%LOCALAPPDATA%\GPUProvider\node_id`. Delete it and the
+  machine enrols as a new node. It is derived from the Windows MachineGuid, so
+  it survives reinstalls. It is an identifier, **not** a credential — see
+  `docs/adr/0004-m1-unauthenticated-heartbeat.md` for why the endpoint takes
+  anyone's word for it in M1 and what has to change before M2.
+- `accepts_work` is false unless the machine has an NVIDIA GPU *and* Ollama is
+  answering, no matter what the tray toggle says. A node that cannot serve must
+  never advertise that it can.
+- Ollama Cloud models are filtered out of `local_models`. They appear in
+  `/api/tags` looking exactly like local weights but are ~400-byte pointers to
+  ollama.com.
+- Kill the orchestrator while the agent runs. The agent must keep retrying with
+  backoff and reconnect on its own; it should never need restarting.
+
+### 7. Run the tests
+
+```powershell
+.\orchestrator\env\Scripts\python.exe -m pytest orchestrator/tests agent/tests -q
+.\orchestrator\env\Scripts\python.exe -m ruff check .
+```
+
+Neither suite needs Postgres, a network, or the desktop GUI libraries — that is
+a hard constraint, because CI has none of them. If you write a test that needs
+a live database, it will pass locally and never run again.
 
 ---
 
