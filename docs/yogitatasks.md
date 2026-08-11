@@ -200,17 +200,7 @@ Standing responsibilities:
 
 ---
 
-## Y6 — Deputy for backend decisions · `ongoing`
 
-During the founder's absences (placements, exams) you hold backend decisions
-so nothing stalls waiting on one person. Anything needing him is labelled
-`needs-r1`.
-
-**Decision point 2026-08-24:** if M0 had not completed, `orchestrator/`
-transferred to you. It completed on 2026-08-10, so this did not fire — noted
-here because the plan references it.
-
----
 
 ## Notes
 
