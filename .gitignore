@@ -63,6 +63,8 @@ venv.bak/
 
 # --- Build & Cache ---
 .cache/
+packaging/build/
+packaging/dist/
 *.log
 coverage/
 .pytest_cache/
