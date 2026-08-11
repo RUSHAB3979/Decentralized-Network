@@ -81,6 +81,14 @@ jobs:
               - '.github/workflows/**'
             context:
               - 'services/context-server/**'
+              # Same four shared roots as contracts/orchestrator/agent above.
+              # They were missing here, so a change to the root dependency tree
+              # or the base tsconfig could break this workspace's typecheck with
+              # nothing scheduled to notice. Keep the four lists in step.
+              - 'packages/contracts/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.base.json'
               - 'docs/**'
               - '.omp/mcp.json'
               - '.claude/mcp.json'
