@@ -34,6 +34,18 @@ updates:
       day: monday
     open-pull-requests-limit: 5
 
+  # agent/requirements.txt is pinned exactly (httpx==, python-dotenv==), which
+  # is deliberate — the agent installs on a provider's own machine. Pinned means
+  # nothing moves on its own, including security fixes, so it needs its own
+  # watcher. Without this entry the one component that runs on hardware we do
+  # not control is the one component nothing updates.
+  - package-ecosystem: pip
+    directory: /agent
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -41,9 +53,9 @@ updates:
       day: monday
     open-pull-requests-limit: 5
 
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
+  # No docker ecosystem entry. The repo contains no Dockerfile — docker-compose.yml
+  # only pulls published images, which Dependabot's docker ecosystem does not read.
+  # An entry pointing at / failed every scheduled run with
+  # `dependency_file_not_found: No Dockerfiles nor Kubernetes YAML found in /`,
+  # which is a permanently red job in the Actions tab reporting nothing.
+  # Add it back the day a Dockerfile lands, pointed at that directory.
