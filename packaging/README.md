@@ -51,7 +51,15 @@ frozen build raise `ImportError` at exactly the moment the source build started
 working, and a packaging file must not be what decides which modules the
 application is allowed to import.
 
-Verified build: 18 MB, launches with no console window, ~9 MB resident.
+Verified build (2026-08-11): 23.6 MB, launches with no console window.
+
+Read the resident figure carefully. A one-file build runs as two processes: the
+bootloader parent, which sits at roughly 8 MB and owns no window, and the child
+that actually runs Python and owns the "GPU Provider" window at roughly 121 MB.
+WebView2 spawns its own helper processes on top of that, which are not counted
+here at all. Checking only the parent makes the app look far lighter than it is
+and, worse, makes a working build look like a broken one — the parent's
+`MainWindowTitle` is always empty.
 
 ## Why UPX is disabled
 
