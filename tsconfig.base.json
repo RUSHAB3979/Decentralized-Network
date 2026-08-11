@@ -1,6 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    // Required, not optional. npm workspaces hoist @types/node to the repo
+    // root, and TypeScript 7 does not walk up to a parent node_modules/@types
+    // for automatic type inclusion the way 5.x did. Without this line every
+    // workspace fails with TS2591 "Cannot find name 'process'". The matching
+    // half is the explicit @types/node devDependency in the root package.json
+    // — with `types` set, TypeScript requires that package to resolve, so it
+    // can no longer be left to arrive transitively via @types/express.
+    "types": ["node"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
