@@ -126,6 +126,29 @@ choosable rather than arbitrary.
 If Phase 0 fails its gate, most of Phase 1 and Phase 2 never get written, which
 is the point of sequencing it first.
 
+## Amendment 2026-08-11 — the inference beachhead
+
+The principle is unchanged. Only the inventory moved, because the
+silent-failure set is a property of the product and ADR 0003 changed the
+product.
+
+The WebRTC, ICE, TURN, and capture-encode-transport rows above are dormant, not
+deleted. They become live again if gaming resumes per ADR 0003.
+
+| Area | Why it degrades instead of throwing |
+|---|---|
+| Sandbox and tenant isolation on the provider machine | A leaked model file or reachable filesystem does not raise. The job completes normally, and the customer never learns that their prompt or weights were exposed |
+| Metering | Wrong billing units produce a plausible invoice. The system cannot distinguish an overcharge from correct behavior, and the customer finds out before we do |
+| Result integrity | A provider returning cheap, truncated, or model-swapped output still returns valid-looking tokens with a `200` status |
+| Capacity and throughput measurement | `agent/bench.py` summed per-request rates derived from Ollama's `eval_duration`, which excludes queue time, and overstated aggregate throughput by 4.3x. Nothing raised. It was found only because a slow CPU made a 30-second p95 time-to-first-token obviously inconsistent with the reported number |
+| Model residency and cold starts | `OLLAMA_NUM_PARALLEL` silently backs off when VRAM is tight, so a node advertises concurrency it will not deliver |
+| Lease expiry and reclaim | An expired lease that is not reclaimed holds a GPU while reporting nothing |
+
+`agent/core/` already exists as the home for exactly this set: `creds.py`,
+`lease.py`, and `meter.py`. Those modules currently raise `NotImplementedError`
+and sit off the boot path on purpose, so they get written deliberately rather
+than under pressure to make the app start.
+
 ## Alternatives considered
 
 **Keep hand-writing everything.** Rejected on arithmetic, not principle. M0 was

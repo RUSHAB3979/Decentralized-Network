@@ -1,16 +1,47 @@
 # GPUProvider Windows packaging
 
-Build the single-file, windowed executable from the repository root:
+Build the single-file, windowed executable from the repository root. The
+dashboard is a Vite build, so it has to exist before PyInstaller runs:
 
 ```powershell
+cd web-client; npm run build:desktop; cd ..
 .\packaging\build.ps1
 ```
 
 The script uses `agent\env\Scripts\python.exe`, installs PyInstaller into that
-virtualenv, and writes the result to `packaging\dist\GPUProvider.exe`. The
-specification packages only the `agent.app` import graph. It has no data files:
-the tray icon is created with PIL at runtime. It does not collect the
-repository, `agent\env`, `web-client`, or `services`.
+virtualenv, and writes the result to `packaging\dist\GPUProvider.exe`. It does
+not collect the repository, `agent\env`, `web-client` sources, or `services` —
+only the `agent.app` import graph plus two sets of data files.
+
+## What the spec ships as data, and why it has to
+
+The tray icon is still drawn with PIL at runtime and is still not a data file.
+The two that are:
+
+**`agent\ui\web\`** — the compiled dashboard. `pywebview` loads it as a
+`file://` URL, so it is read from disk at runtime rather than imported, and
+import-graph analysis cannot see it. If it is missing the window opens and
+paints nothing, with no error anywhere. The spec therefore checks for
+`desktop.html` and aborts the build rather than producing an executable whose
+only symptom is a blank window.
+
+**pywebview's .NET interop assemblies** — `Microsoft.Web.WebView2.Core.dll`,
+`Microsoft.Web.WebView2.WinForms.dll`, `WebBrowserInterop.x64.dll`, and a
+`WebView2Loader.dll` per architecture. These are loaded by path through
+`clr.AddReference`, which is again invisible to analysis.
+
+The layout matters and is not the obvious one. `webview\util.py`'s frozen-path
+branch looks for the assemblies **flat at `sys._MEIPASS`**, not under the
+`webview\lib\` tree they occupy in site-packages, and `edgechromium.py` appends
+`sys._MEIPASS\win-x64` (and the arm64/x86 equivalents) to `PATH` for the
+loaders. Mirroring the source layout would put every file somewhere nothing
+looks, and the failure surfaces as a .NET `FileNotFoundException` at import
+time, in the frozen build only.
+
+`hiddenimports` carries `pystray._win32`, `webview.platforms.winforms` and
+`webview.platforms.edgechromium` for the same underlying reason: all three are
+chosen at runtime by string — pystray from the platform, pywebview by walking a
+list of `import_*` functions in `guilib.py` — so none appears in the graph.
 
 `agent.core` is absent from the current build simply because nothing imports it
 yet. That is import-graph analysis doing its job, not an exclusion — the spec

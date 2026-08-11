@@ -23,3 +23,15 @@ python-dotenv==1.2.2
 # file.
 pystray==0.19.5
 pillow==12.3.0
+
+# Desktop dashboard. pywebview draws the window with Edge WebView2, which is
+# already on every supported Windows machine, so this ships no browser engine
+# and no HTTP server - the window loads a file from disk. It does pull in
+# pythonnet to reach WinForms, which is the largest single addition to the
+# agent's footprint in this file and the one worth re-justifying if it grows.
+#
+# Against the test that governs this file: the page can only reach the process
+# through the js_api object in agent/ui/window.py. That object exposes reading
+# a telemetry snapshot and toggling whether this node accepts work. Rendering
+# gains the agent no reach it did not already have.
+pywebview==6.2.1
