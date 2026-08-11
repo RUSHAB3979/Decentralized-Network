@@ -12,5 +12,14 @@
 # Pinned exactly (==) so every provider machine resolves the same tree. Bumps
 # come through Dependabot.
 
+# Control plane and Ollama, both over HTTP.
 httpx==0.28.1
 python-dotenv==1.2.2
+
+# System tray UI. pystray is the whole reason pillow is here - it takes icons
+# as PIL images, and drawing them in code avoids shipping an .ico as a
+# PyInstaller data file. Both are pure presentation: neither one gets the agent
+# any reach it did not already have, which is the test that matters for this
+# file.
+pystray==0.19.5
+pillow==12.3.0
