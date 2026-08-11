@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Github, LockKeyhole, Mail, User, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LockKeyhole, Mail, User, Zap } from 'lucide-react';
+import GithubMark from './icons/GithubMark';
 import Logo from './Logo';
 import GlowCursor from './fx/GlowCursor';
 import Starfield from './fx/Starfield';
@@ -94,7 +95,7 @@ const AuthPage = ({ initialMode }) => {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <button type="button" className="auth-social" data-mag><Github className="h-4 w-4"/>GitHub</button>
+                <button type="button" className="auth-social" data-mag><GithubMark className="h-4 w-4"/>GitHub</button>
                 <button type="button" className="auth-social" data-mag><span className="text-base font-semibold text-iridescent">G</span>Google</button>
               </div>
               <div className="my-6 flex items-center gap-4">

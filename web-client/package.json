@@ -9,15 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "lucide-react": "^1.31.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "lucide-react": "^0.468.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.5",
-    "vite": "^8.2.1",
+    "postcss": "^8.4.49",
     "tailwindcss": "^4.3.3",
-    "postcss": "^8.4.49"
+    "vite": "^8.2.1"
   }
 }
