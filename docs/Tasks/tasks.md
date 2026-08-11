@@ -221,16 +221,31 @@ arrived first, so the title is retired; the tasks are still worth doing.
 ## After M0 (do not start early)
 
 **M1 — Register + heartbeat.** First genuinely parallel milestone; per-person
-split in TEAM-EXECUTION-PLAN.md §7.
+split in TEAM-EXECUTION-PLAN.md §7. **Code complete 2026-08-11**, built in one
+pass rather than by the per-person split — the split stands for review ownership.
 
-1. `ProviderNode` table + migration — R9
-2. Pydantic models for heartbeat/capability/metrics — R1, **ships first**
-3. `POST /providers/register` · `POST /providers/heartbeat` — R5
-4. Agent loop every N seconds — R6
-5. Stale → offline (TTL) — R5
-6. Frontend wires the provider list to real data, deletes the mock — R8
-7. Security review: the heartbeat endpoint is unauthenticated — R4 decides
-   whether that is acceptable for M1 and writes down why
+| # | Task | Owner | Done | Lands in |
+|---|------|-------|------|----------|
+| 1 | `ProviderNode` table + migration | R9 | [x] | `orchestrator/schema.sql` |
+| 2 | Pydantic models for heartbeat/capability/metrics (**ships first**) | R1 | [x] | `orchestrator/models.py` |
+| 3 | `POST /providers/register` · `POST /providers/heartbeat` | R5 | [x] | `orchestrator/main.py` |
+| 4 | Agent loop every N seconds | R6 | [x] | `agent/reporter.py`, `agent/identity.py` |
+| 5 | Stale → offline (TTL) | R5 | [x] | `orchestrator/liveness.py` |
+| 6 | Frontend wires the provider list to real data, deletes the mock | R8 | [x] | `NodeTelemetry.jsx`, `useProviderNodes.js`, `services/api.js` |
+| 7 | Security review of the unauthenticated heartbeat | R4 | [x] | [ADR 0004](../adr/0004-m1-unauthenticated-heartbeat.md) |
+
+Deliberately **not** in M1, and not started: tokens, earnings, leases, metering,
+and the provider credential. `agent/core/creds.py` was re-spec'd rather than
+implemented — it stays hand-built under ADR 0002, and its header now carries the
+six design questions M1 raised.
+
+**Item 7's answer is "yes, for now, and here is the expiry date."** ADR 0004
+records what an attacker can do with an unauthenticated heartbeat (pollute the
+registry, impersonate a node id, take a competitor offline) and what they cannot
+(obtain work, prompts, payment, or a balance change). It also states the
+condition that ends it: the first time a lease is claimable by node id, or usage
+is recorded, or a payout is computed. **Until then the orchestrator must not be
+internet-exposed.**
 
 ---
 
@@ -245,6 +260,9 @@ split in TEAM-EXECUTION-PLAN.md §7.
 | 2026-08-11 | **`main`'s typecheck had been broken for 26 hours and nothing said so.** PR #8, titled "the npm-development group with 2 updates", carried `typescript` 5.9→7.0. TypeScript 7 no longer walks up to a parent `node_modules/@types`, and npm workspaces hoist `@types/node` to the repo root, so every workspace failed with TS2591 "Cannot find name 'process'". It was merged by hand while its own run recorded three failures — the second red hand-merge in two days, an hour before #9. It stayed hidden because `paths-filter` scheduled none of the affected jobs. Fixed in #26 with `"types": ["node"]` in `tsconfig.base.json` and an explicit root `@types/node`. Issue #18's published diagnosis (a vanishing transitive dependency) was wrong and was corrected in the fix. |
 | 2026-08-11 | **Two CI-configuration gaps closed behind it.** #28: the `context` paths-filter was missing the four shared roots its three siblings list, so a change to the root dependency tree or the base tsconfig could break that workspace unwatched — which is exactly what #26 did. #27: Dependabot was watching a `docker` ecosystem with no Dockerfile in the repo (manufacturing a failing run every week) and was not watching `agent/requirements.txt` at all, though exactly-pinned dependencies need a watcher more than loose ones. |
 | 2026-08-11 | **Web-client majors landed, split one per PR.** Dependabot had bundled `react`, `react-dom` and `lucide-react` together twice (#6, #24); both times a failure had three candidate causes and no way to bisect. Taken separately: #30 lucide 0.468→1.31, where all 51 imported icon names were diffed against the installed package rather than found one build error at a time — exactly one, `Github`, is gone (1.x drops brand logos), replaced by a local `GithubMark` component. #32 React 18→19, where the removed APIs were checked against the source and all 16 ref props confirmed to be `useRef` objects, since React 19 reinterprets a ref callback's return value as a cleanup function. **With no tests in web-client, a green build only proves the bundle compiles** — nearly all behaviour here is `useEffect` and canvas rAF loops — so the production build was loaded in headless Chrome across all ten routes: every route mounts and renders with zero console errors. Both builds emitted a byte-identical CSS hash, proving no styling moved. |
+
+| 2026-08-11 | **M1 code complete — identity, heartbeat, and the website's first real data.** All seven items landed: `provider_nodes` schema, the Pydantic wire contract, register/heartbeat/nodes endpoints, the agent's fourth thread, TTL liveness, the frontend cutover, and ADR 0004 on the unauthenticated heartbeat. `MOCK_NODES` is deleted. Two design positions worth carrying forward: **liveness is derived from `last_heartbeat_at` at read time, never stored** — an `is_online` column plus a sweeper that dies leaves every row reading "online" forever with nothing raising; and **register upserts while heartbeat returns 404**, so a restored database self-heals by re-registration instead of quietly refilling with rows whose hardware fields are permanently null. Verified end to end against real Postgres and the real agent, including all three liveness states, the orchestrator being killed mid-run (website shows an error, never an empty fleet) and the agent reconnecting on its own when it came back. |
+| 2026-08-11 | **Two silent-degradation bugs found while wiring M1, both of the "nothing raises" class.** `ollama --version` prints `"ollama version is 0.32.8"`, so the whole sentence was being stored in a version column and rendered on the site — now `out.split()[-1]`. And §8.3's cloud-model trap became live the moment enrolment advertised a model list: Ollama Cloud entries in `/api/tags` are ~400-byte pointers carrying `remote_host`, and a node listing them claims capacity it does not have, with the work proxied to ollama.com on the provider's own account. Filtered on the explicit key in all three places, including `runtime/ollama.py::models()`, whose docstring said "locally available" while it returned them. **The filter proves weights are on disk, nothing more — it is not model-residency logic and must not become a scheduling input.** |
 
 <!-- Add a line each session. -->
 

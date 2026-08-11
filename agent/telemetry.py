@@ -52,6 +52,12 @@ class Gpu:
 class Model:
     name: str
     size_mb: int | None
+    # True for Ollama Cloud entries, which appear in /api/tags exactly like
+    # local models but are ~400-byte pointers to ollama.com. Recorded as a
+    # fact from the API rather than inferred from the size, because "small
+    # file" and "not actually on this disk" are different claims and only the
+    # second one is safe to make.
+    remote: bool = False
 
 
 @dataclass
@@ -174,6 +180,10 @@ def _model(entry: dict) -> Model:
     return Model(
         name=entry.get("name") or entry.get("model") or "unknown",
         size_mb=int(size // (1024 * 1024)) if isinstance(size, int) else None,
+        # Ollama adds `remote_host` and `remote_model` to cloud entries and
+        # omits them entirely for local ones. Verified against /api/tags:
+        # qwen2.5:0.5b has neither key, qwen3-vl:235b-cloud has both.
+        remote=bool(entry.get("remote_host")),
     )
 
 
@@ -195,9 +205,18 @@ def _ollama_version() -> str | None:
     if binary is None:
         return None
     try:
-        return winproc.run([str(binary), "--version"], timeout=10).stdout.strip() or None
+        out = winproc.run([str(binary), "--version"], timeout=10).stdout.strip()
     except (subprocess.SubprocessError, OSError):
         return None
+    if not out:
+        return None
+    # `ollama --version` prints the sentence "ollama version is 0.32.8", not a
+    # version. This field is stored in the orchestrator as `ollama_version` and
+    # rendered on the provider list, so the sentence has to be reduced to the
+    # thing the field claims to hold. The last whitespace-separated token is
+    # taken rather than a regex over the whole line, so an unexpected future
+    # wording degrades to "shows something odd" rather than to None.
+    return out.split()[-1]
 
 
 def detect_ollama(host: str = DEFAULT_HOST) -> Ollama:

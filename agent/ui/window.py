@@ -23,7 +23,7 @@ from pathlib import Path
 import webview
 
 from agent import telemetry
-from agent.state import ProviderState, Status
+from agent.state import ProviderState
 
 
 def _asset_root() -> Path:
