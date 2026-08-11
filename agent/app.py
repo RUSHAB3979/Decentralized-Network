@@ -24,7 +24,7 @@ import threading
 
 from agent.runtime.ollama import OllamaError, OllamaSupervisor
 from agent.state import ProviderState, Status
-from agent.ui import tray
+from agent.ui import tray, window
 
 # Slow enough to be free, fast enough that a provider who kills Ollama sees the
 # tray go red before they wonder whether the app noticed.
@@ -90,6 +90,8 @@ def main() -> int:
         else:
             state.set(Status.DRAINING, "not accepting new work")
 
+    dashboard = window.build(state, on_drain_change)
+
     def on_quit() -> None:
         stop.set()
         worker.join(timeout=5)
@@ -97,8 +99,22 @@ def main() -> int:
         # already running is left alone. See runtime/ollama.py.
         supervisor.stop()
         state.set(Status.STOPPED, "")
+        # Ends the GUI loop below. Without this the process survives the tray
+        # being quit, because webview.start() is still holding the main thread.
+        dashboard.destroy()
 
-    tray.build(state, on_drain_change, on_quit).run()
+    icon = tray.build(state, on_drain_change, on_quit, on_open=dashboard.show)
+    icon.run_detached()
+
+    # Blocks the main thread until on_quit destroys the window. The window is
+    # created hidden and shown here, once the GUI loop is actually running -
+    # showing it before that races the loop and can paint an empty frame.
+    #
+    # Launching straight to the dashboard is right while a human is starting
+    # this by hand. Once the app auto-starts at login it should come up in the
+    # tray instead, which is a flag this does not have yet.
+    window.run(dashboard, on_started=dashboard.show)
+    icon.stop()
     return 0
 
 
