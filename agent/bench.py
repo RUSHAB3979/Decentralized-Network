@@ -82,6 +82,7 @@ class Report:
     cold_start_s: float
     concurrency: dict[int, float] = field(default_factory=dict)
     per_run: dict[int, list[float]] = field(default_factory=dict)
+    wall_s: dict[int, float] = field(default_factory=dict)
 
 
 def detect_gpu() -> Gpu | None:
@@ -191,13 +192,19 @@ async def measure_cold_start(client: httpx.AsyncClient, model: str) -> float:
 
 async def measure_concurrency(
     client: httpx.AsyncClient, model: str, level: int
-) -> list[RunResult]:
-    """Fire `level` generations at once and return every result.
+) -> tuple[list[RunResult], float]:
+    """Fire `level` generations at once. Returns the results and the wall clock.
 
-    Aggregate throughput, not single-stream speed, is what the utilisation
-    maths needs  -  one request never saturates a GPU.
+    The wall clock is not optional bookkeeping, it is the measurement. Ollama's
+    eval_duration counts only the time a request spent generating, never the
+    time it spent queued behind another request. Summing per-request rates
+    therefore reports the throughput the server would have had if every request
+    really ran in parallel, which is a claim about the server rather than an
+    observation of it. Total tokens over total elapsed time cannot lie that way.
     """
-    return await asyncio.gather(*(generate(client, model) for _ in range(level)))
+    started = time.perf_counter()
+    runs = await asyncio.gather(*(generate(client, model) for _ in range(level)))
+    return runs, time.perf_counter() - started
 
 
 async def main() -> int:
@@ -239,16 +246,36 @@ async def main() -> int:
         report = Report(gpu=gpu, model=args.model, cold_start_s=cold)
 
         print("\nmeasuring throughput")
-        print(f"{'conc':>5}  {'agg tok/s':>10}  {'per-stream':>11}  {'p95 ttft':>9}")
+        print(f"{'conc':>5}  {'agg tok/s':>10}  {'uncontended':>12}  {'p95 ttft':>9}")
+        serialised: list[int] = []
         for level in levels:
-            runs = await measure_concurrency(client, args.model, level)
-            aggregate = sum(r.tokens_per_s for r in runs)
-            per_stream = aggregate / level
+            runs, wall_s = await measure_concurrency(client, args.model, level)
+            tokens = sum(r.output_tokens for r in runs)
+            aggregate = tokens / wall_s if wall_s > 0 else 0.0
+            # What the sum of per-request rates would have claimed. It matches
+            # `aggregate` only when the requests genuinely overlapped, so the
+            # gap between the two columns is the queueing the server did.
+            uncontended = sum(r.tokens_per_s for r in runs)
             ttfts = sorted(r.ttft_s for r in runs)
             p95 = ttfts[min(int(len(ttfts) * 0.95), len(ttfts) - 1)]
+            if level > 1 and uncontended > aggregate * 1.3:
+                serialised.append(level)
             report.concurrency[level] = aggregate
             report.per_run[level] = [r.tokens_per_s for r in runs]
-            print(f"{level:>5}  {aggregate:>10.1f}  {per_stream:>11.1f}  {p95:>8.2f}s")
+            report.wall_s[level] = wall_s
+            print(f"{level:>5}  {aggregate:>10.1f}  {uncontended:>12.1f}  {p95:>8.2f}s")
+
+        if serialised:
+            print(
+                f"\nWARNING: at concurrency {serialised}, the uncontended column"
+                f" is far above\n         the measured aggregate. The server ran"
+                f" these requests one after\n         another rather than"
+                f" together. Ollama caps parallelism with\n         "
+                f"OLLAMA_NUM_PARALLEL, and it backs off when VRAM is tight."
+                f"\n         Set it explicitly before trusting any number here:"
+                f" a provider\n         serving one request at a time earns a"
+                f" fraction of what this\n         hardware could."
+            )
 
     peak = max(report.concurrency.values()) if report.concurrency else 0.0
     print(f"\npeak aggregate throughput: {peak:.1f} tok/s")
