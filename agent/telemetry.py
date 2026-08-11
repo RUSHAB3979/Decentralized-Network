@@ -14,6 +14,7 @@ be able to say that calmly instead of showing a traceback.
 from __future__ import annotations
 
 import ctypes
+import functools
 import os
 import platform
 import socket
@@ -23,6 +24,7 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 
+from agent import winproc
 from agent.runtime.ollama import DEFAULT_HOST, find_binary
 from agent.state import ProviderState
 
@@ -130,15 +132,13 @@ def detect_gpu() -> Gpu | None:
     if shutil.which("nvidia-smi") is None:
         return None
     try:
-        out = subprocess.run(
+        out = winproc.run(
             [
                 "nvidia-smi",
                 "--query-gpu=name,memory.total,memory.used,utilization.gpu,"
                 "temperature.gpu,driver_version",
                 "--format=csv,noheader,nounits",
             ],
-            capture_output=True,
-            text=True,
             timeout=15,
             check=True,
         ).stdout.strip()
@@ -177,6 +177,29 @@ def _model(entry: dict) -> Model:
     )
 
 
+@functools.lru_cache(maxsize=1)
+def _ollama_version() -> str | None:
+    """The installed Ollama version, resolved once per process.
+
+    Cached because the dashboard polls telemetry every few seconds and this is
+    the only part of a snapshot that cannot change while the app is running.
+    Spawning a process on that interval to re-read a constant is waste that
+    shows up as real cost on a provider's machine, and it was also how a
+    console window ended up flashing on screen every three seconds.
+
+    The trade is that upgrading Ollama underneath a running app reports the old
+    version until restart. That is acceptable for a display field; it must not
+    be reused for anything that gates behaviour on a version number.
+    """
+    binary = find_binary()
+    if binary is None:
+        return None
+    try:
+        return winproc.run([str(binary), "--version"], timeout=10).stdout.strip() or None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
 def detect_ollama(host: str = DEFAULT_HOST) -> Ollama:
     try:
         tags = httpx.get(f"{host}/api/tags", timeout=5)
@@ -197,21 +220,9 @@ def detect_ollama(host: str = DEFAULT_HOST) -> Ollama:
     except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
         pass
 
-    version: str | None = None
-    binary = find_binary()
-    if binary is not None:
-        try:
-            version = subprocess.run(
-                [str(binary), "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            ).stdout.strip() or None
-        except (subprocess.SubprocessError, OSError):
-            version = None
-
-    return Ollama(reachable=True, version=version, available=available, loaded=loaded)
+    return Ollama(
+        reachable=True, version=_ollama_version(), available=available, loaded=loaded
+    )
 
 
 def snapshot(state: ProviderState, host: str = DEFAULT_HOST) -> Telemetry:

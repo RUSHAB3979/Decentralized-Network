@@ -22,11 +22,12 @@ from pathlib import Path
 
 import httpx
 
-DEFAULT_HOST = "http://127.0.0.1:11434"
+# Single definition, in agent/winproc.py, along with the explanation of why a
+# windowed app has to pass it. This module had its own copy and telemetry.py
+# had none, which is exactly how the console flash came back.
+from agent.winproc import CREATE_NO_WINDOW
 
-# Without this, 'ollama serve' flashes a console window on every launch. The
-# app is meant to sit in the tray unnoticed.
-CREATE_NO_WINDOW = 0x08000000
+DEFAULT_HOST = "http://127.0.0.1:11434"
 
 
 class OllamaError(RuntimeError):

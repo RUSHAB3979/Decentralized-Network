@@ -90,6 +90,13 @@ def detect_gpu() -> Gpu | None:
     if shutil.which("nvidia-smi") is None:
         return None
     try:
+        # Deliberately not routed through agent/winproc.py, unlike every other
+        # subprocess call in this package. This file is run as a standalone
+        # script - `python agent/bench.py`, including copied by itself onto a
+        # rented GPU box - so the repository root is not on sys.path and a
+        # package import would break that. It is also console-only, so the
+        # child inherits this terminal and creates no window. If bench ever
+        # gets called from the windowed app, this has to change.
         out = subprocess.run(
             [
                 "nvidia-smi",
