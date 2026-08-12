@@ -13,7 +13,9 @@
 # ONE PRIMARY OWNER PER PATH. Co-ownership was tried and removed: three names
 # on a path means the review notification is everyone's job and therefore
 # nobody's. Where a second name appears below it is a deliberate cross-check
-# (security, or an interface the architect must approve), not shared custody.
+# (security, an interface the architect must approve, or the R2/R3 infra pair
+# added 2026-08-12), not shared custody. In every such case the FIRST name is
+# the primary owner and the second is the cross-check.
 
 # ---------------------------------------------------------------------------
 # Default — unowned paths fall to the founder rather than to nobody
@@ -45,7 +47,9 @@
 # R6 / R2 — Provider Agent, Network & Streaming: @Shubh-tech-grow
 # Both live on the provider's machine, so they are one surface.
 # WebRTC/TURN/signalling code does not exist yet; add paths as it lands rather
-# than pre-declaring directories that would never match.
+# than pre-declaring directories that would never match. ADR 0003 deferred
+# gaming, so R2's live problem is now inference ingress from a machine with no
+# public address — see docs/shubhtasks.md S5. Add its paths when they land.
 # ---------------------------------------------------------------------------
 /agent/                         @Shubh-tech-grow
 /docs/solution/SESSION-FLOW.md  @Shubh-tech-grow
@@ -53,9 +57,16 @@
 # ---------------------------------------------------------------------------
 # R3 / R9 — Cloud, Platform, Database: @YogitaKanwar
 # The infrastructure and the database it runs are deliberately one owner.
+#
+# docker-compose.yml is the one exception, added 2026-08-12: @Shubh-tech-grow
+# joins as cross-check because ADR 0003 took WebRTC/TURN off R2's critical path
+# and the compose file's stale half is the provider-agent half — it still
+# starts the frozen TypeScript agent. @YogitaKanwar stays primary; this is a
+# second reviewer on a file whose rot lives on the other person's surface, not
+# shared custody. If it produces two owners and no decisions, delete this line.
 # ---------------------------------------------------------------------------
 /.github/                       @YogitaKanwar
-/docker-compose.yml             @YogitaKanwar
+/docker-compose.yml             @YogitaKanwar @Shubh-tech-grow
 /.ruff.toml                     @YogitaKanwar
 
 # ---------------------------------------------------------------------------
@@ -63,8 +74,12 @@
 # Owns T-01 and T-04, the two risks the register marks platform-killing.
 # ci.yml is the one genuinely co-owned file: DevOps owns the build jobs,
 # Security owns the gitleaks/trivy/SBOM gates that live in the same file.
+# @Shubh-tech-grow added 2026-08-12 for the build jobs only — the `python` job
+# runs on ubuntu-latest and never installs agent/requirements.txt, so the
+# Windows app ships with no CI that can start it (docs/shubhtasks.md S8).
+# Build jobs only. The security gates are not his to touch.
 # ---------------------------------------------------------------------------
-/.github/workflows/ci.yml       @YogitaKanwar @ryujikentaro
+/.github/workflows/ci.yml       @YogitaKanwar @ryujikentaro @Shubh-tech-grow
 /docs/RISK-REGISTER.md          @ryujikentaro
 /docs/LEGAL-SECURITY-REQUIREMENTS-INDIA.md  @ryujikentaro
 /docs/SECURITY-LEGAL-EXECUTION-RESEARCH-2026-08.md  @ryujikentaro
