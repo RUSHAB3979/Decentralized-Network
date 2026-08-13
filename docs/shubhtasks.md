@@ -17,8 +17,19 @@ in code that already shipped. Do it first so the next PR starts from a clean
 file. Then **S5 — inference ingress**, which is the largest unowned piece of
 networking in the repo and is on M2's critical path.
 
-**S1** stays available whenever you have the GPU box and no orchestrator: it
-needs neither.
+**Updated 2026-08-13, after #39.** S1, S2 and S4 all landed. S2 is complete and
+is the quality bar for the rest of this file. S1 needs one re-run on the GPU
+box — the probe ran on a machine with no NVIDIA GPU, so only the negative path
+is answered. S4 needs one honest relabelling. Both are small; the notes are in
+their sections. After those, S3a then S5.
+
+One boundary to watch: #39 also changed three files under `web-client/`, which
+CODEOWNERS assigns to [@AdarshNarwankar](https://github.com/AdarshNarwankar),
+and it merged with no review. TEAM-EXECUTION-PLAN §4 rule 2 is *read anything,
+change only your surface* — not because the code was bad, but because two
+people editing one surface unannounced is how the frontend gets a conflict
+nobody saw coming. If the provider console needed a heartbeat panel, that is an
+issue on Adarsh's list or a PR he reviews.
 
 ### A note on what changed under you
 
@@ -32,10 +43,11 @@ has to reach Ollama on a stranger's home PC that has no public address, no port
 forward, and quite possibly carrier-grade NAT in front of it. That is the same
 NAT-traversal problem wearing different clothes, and nobody owns it yet.
 
-S2 and S4 are left standing as written. The transport decision and
-`SESSION-FLOW.md` describe the deferred gaming path, so treat them as *not
-current* rather than as instructions — ADR 0003 says gaming is deferred, not
-abandoned, and that work becomes live again the day it resumes.
+S2 and S4 were left standing as written, and you delivered both. That was the
+right call — they are now the written record of the gaming track, ready for the
+day it resumes. What they need is a label saying so, not a rewrite: ADR 0003
+says gaming is deferred, not abandoned, and deferred work still deserves an
+accurate shelf. See the notes in each section.
 
 ---
 
@@ -113,7 +125,21 @@ handles it.
 
 ---
 
-## S1 — NVML telemetry spike · `pending`
+## S1 — NVML telemetry spike · `done (partial)` — delivered in #39, 2026-08-13
+
+Delivered as `docs/spikes/nvml-telemetry.md` plus `nvml-telemetry.py`, in
+`docs/spikes/` as asked, with no new dependency added to `agent/`. Both of
+those were the right calls.
+
+**One thing is still open.** The probe ran on a machine with no NVIDIA GPU, so
+the document reports the negative path — no `nvidia-smi` inventory, no rentable
+device — and nothing else. That is a genuine result and worth having, because
+most people's machines are not the GPU box. But every question below that
+*needs a GPU present* is still unanswered: cost per sample, which metrics need
+admin rights, and whether the read blocks under full load. Re-run it on the GPU
+machine and append the results; that closes S1.
+
+The comparison against the incumbent is also still open — see below.
 
 A standalone script that reads real GPU stats from a real GPU.
 
@@ -150,7 +176,31 @@ what survives.
 
 ---
 
-## S2 — Transport decision · `pending`
+## S2 — Transport decision · `done` — delivered in #39, filed against the deferred track
+
+`docs/spikes/transport-decision.md` answers every question this task asked, and
+answers them properly: options weighed and rejected with reasons, the TURN cost
+arithmetic shown line by line rather than asserted (8 Mbps → 3.6 GB/hour → 15%
+relayed → ~2.7¢ per relayed session-hour), the relay fraction given as a
+10–20% planning range with the reasoning behind the range, a per-hop latency
+budget, and codec/encoder assumptions. Showing the working is what makes it
+correctable later. This is the standard the other spikes should meet.
+
+**It answers the question as it stood before ADR 0003.** The decision is scoped
+to "the gaming track" and to "the current product direction for cloud gaming."
+[ADR 0003](adr/0003-inference-beachhead.md) was accepted 2026-08-11 and moved
+the beachhead to LLM inference; this landed 2026-08-13. So the document is not
+wrong — it is research filed against a track that is deferred, and ADR 0003
+says deferred, not abandoned. It becomes live again the day gaming resumes.
+
+**Until then, one section must not be read as instructions.** Its *"What this
+means for the codebase — build now"* list names WebRTC signaling, ICE
+gathering, STUN/TURN configuration and encoder detection. None of that is on
+the critical path today, and a future reader will take a "build now" heading
+literally. Add a dated banner at the top of the file marking it as the
+deferred gaming track and pointing at ADR 0003 and at S5.
+
+The live transport question is now S5, and it is unowned until you take it.
 
 A written decision on how session media actually moves: WebRTC versus the
 alternatives.
@@ -223,11 +273,28 @@ the wrong half of the system.
 
 ---
 
-## S4 — `SESSION-FLOW.md` · `ongoing`
+## S4 — `SESSION-FLOW.md` · `ongoing` — rewritten in #39, one correction needed
 
 You own `docs/solution/SESSION-FLOW.md`. Keep it true as the transport and
 telemetry decisions land. A flow document that describes an intention rather
 than the system is worse than no document, because people trust it.
+
+The #39 rewrite got the provider-readiness half right — telemetry, register,
+heartbeat, orchestrator state, provider console — and that half matches shipped
+code, including Ollama reachability and version.
+
+**The other half needs a correction, and it is the exact failure this task was
+written to prevent.** The document opens with *"It tracks the real flow we have
+now"* and then lists *"the session transport uses WebRTC with TURN fallback"*
+among those real flows. There is no WebRTC anywhere in this repository. Nothing
+gathers ICE, nothing signals SDP, no TURN server is provisioned. It is an
+intention presented as the running system, under a sentence that explicitly
+tells the reader it is not.
+
+Split the document so the two halves cannot be confused: mark the readiness and
+heartbeat flow as **implemented**, and move the gaming transport section under a
+heading that names it as **deferred by ADR 0003 and not built**. Same content,
+honest labels. Then it is a document people can trust again.
 
 ---
 
@@ -367,3 +434,4 @@ Add a dated line when something changes.
 |------|------|
 | 2026-08-10 | File created. `agent/` transferred on Block D completion. S0 supersedes the plan's "run the frozen TS agent" — a real Python agent now exists. |
 | 2026-08-12 | **S3 closed as done** — it was built during M1's single-pass implementation rather than by the per-person split, and criterion 5 came out unmet, which is now S3a. **S2 and S4 left standing but no longer current**: ADR 0003 deferred cloud gaming on 2026-08-11, which takes WebRTC, ICE and TURN off the critical path. **Four tasks added.** S5 and S6 are R2 work repointed at the inference market — the NAT problem did not go away, it changed shape. S7 and S8 are DevOps, on the back of co-ownership of `docker-compose.yml` and `ci.yml`'s build jobs granted the same day. |
+| 2026-08-13 | **#39 merged: S1, S2 and S4 delivered.** S2 is complete and is the quality bar for the rest of this file — the TURN arithmetic is shown rather than asserted. S1 is partial: the probe ran on a machine with no NVIDIA GPU, so only the negative path is answered. S4's rewrite lists WebRTC/TURN among "the real flow we have now", which is not true of this repository and needs relabelling. Both fixes are small and noted in their sections. #39 also changed three `web-client/` files, which CODEOWNERS assigns to @AdarshNarwankar, and merged with no review — flagged under Current priority. |
