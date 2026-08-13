@@ -39,7 +39,7 @@ Execution detail — first tasks, sequencing, and clash rules — lives in
 |---|---|---|
 | [@RUSHAB3979](https://github.com/RUSHAB3979) | **R1** Architect + **R5** Orchestrator *(M0 only)* | `orchestrator/`, `packages/contracts/`, all interface decisions |
 | [@YogitaKanwar](https://github.com/YogitaKanwar) | **R3** Cloud/Platform + **R9** Database → **R5** after M0 | `.github/`, `docker-compose.yml`, schema + migrations — task list: [yogitatasks.md](./yogitatasks.md) |
-| [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, streaming/TURN, telemetry — task list: [shubhtasks.md](./shubhtasks.md) |
+| [@Shubh-tech-grow](https://github.com/Shubh-tech-grow) | **R2** Network & Streaming + **R6** Provider Agent | `agent/`, inference ingress, telemetry; cross-check on `docker-compose.yml` and `ci.yml`'s build jobs — task list: [shubhtasks.md](./shubhtasks.md) |
 | [@ryujikentaro](https://github.com/ryujikentaro) | **R4** Security & Sandbox + **R10** SRE | Threat model, sandbox, CI security gates, runbooks — task list: [ryujitasks.md](./ryujitasks.md) |
 | [@AdarshNarwankar](https://github.com/AdarshNarwankar) | **R8** Frontend + **R7** Payments *(when it starts)* | `web-client/` — task list: [adarshtasks.md](./adarshtasks.md) |
 
@@ -69,6 +69,26 @@ because an interface change is a decision that breaks four surfaces at once.
   will be paged is the person who wrote the sandbox.
 - **R7** — parked with R8's owner. No payment code exists; the name is there so
   it does not get discovered unowned at Phase 1.
+
+### Amendment, 2026-08-12 — R2 joins the infra files
+
+Rule 1 above said one primary owner per surface, and it still does.
+`docker-compose.yml` and `ci.yml`'s build jobs now carry
+[@Shubh-tech-grow](https://github.com/Shubh-tech-grow) as a **second** name.
+@YogitaKanwar remains primary on both.
+
+The reason is that rule 2 — pair roles that share a machine or a lifecycle —
+started pointing the other way. [ADR 0003](./adr/0003-inference-beachhead.md)
+deferred cloud gaming, which took WebRTC, ICE and TURN off R2's critical path
+and left that role with less to own than the plan assumed. Meanwhile both files
+had rotted specifically on the provider-agent side: compose still starts the
+frozen TypeScript agent, and CI has no job that installs
+`agent/requirements.txt` or runs on Windows. The stale halves are on his
+surface; the files are on hers.
+
+This is the arrangement the "one primary owner" rule exists to prevent, so it
+is on probation. **If it produces two owners and no decisions, revert it** —
+delete the second name from both CODEOWNERS lines and this section with it.
 
 R4's owner carries T-01 and T-04, the two risks the register marks as
 platform-killing. That is a lot of blast radius resting on one person; add a
