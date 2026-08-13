@@ -72,6 +72,16 @@ jobs:
               - 'web-client/**'
               - '.github/workflows/**'
             python:
+              # Any Python file anywhere, not just the three product roots
+              # below. This job runs `ruff check .` and py_compile over
+              # `git ls-files '*.py'` — both repo-wide — so listing only
+              # directories meant a .py file outside them was linted by a job
+              # that nothing scheduled. docs/spikes/nvml-telemetry.py landed on
+              # main in #39 with an unused import and CI stayed green for two
+              # hours, until an unrelated agent/ change happened to trigger
+              # this job and fail on someone else's file. The trigger has to
+              # match the job's actual scope or the gate is decorative.
+              - '**/*.py'
               - 'blender_pvp/**'
               - 'orchestrator/**'
               - 'agent/**'
