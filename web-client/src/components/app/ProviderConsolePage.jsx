@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import NodeTelemetry from '../NodeTelemetry';
 import { useProviderNodes, summarise } from '../../hooks/useProviderNodes';
+import AgentHeartbeatPanel from './AgentHeartbeatPanel';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Gauge },
@@ -50,6 +51,7 @@ const OverviewTab = ({ onOpenNodes, onOpenOnboarding }) => {
       [CircleDollarSign, 'Preview earnings', '$0.00', 'No metering yet', false],
       [HeartPulse, 'Control-plane status', registry.status === 'loading' ? 'Checking' : unreachable ? 'Unreachable' : 'Connected', unreachable ? 'Is the orchestrator running?' : 'Provider registry responding', true],
     ].map(([Icon, label, cardValue, detail, live]) => <article key={label} className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5"><div className="flex items-center justify-between"><Icon className={`h-4 w-4 ${live && unreachable ? 'text-amber-300' : 'text-emerald-300'}`} /><span className="font-mono text-[8px] uppercase tracking-[0.16em] text-slate-700">{live ? 'Live' : 'Preview'}</span></div><p className="mt-5 font-mono text-[8px] uppercase tracking-[0.18em] text-slate-700">{label}</p><p className="mt-2 text-2xl font-medium tracking-[-0.03em] text-slate-200">{cardValue}</p><p className="mt-2 text-[10px] text-slate-700">{detail}</p></article>)}</div>
+    <AgentHeartbeatPanel registry={registry} onOpenNodes={onOpenNodes} />
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"><section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-sm font-medium text-slate-200">Provider readiness</h2><p className="mt-1 text-[11px] text-slate-600">Real capacity must pass identity, benchmark, policy, and runtime gates.</p></div><BadgeCheck className="h-5 w-5 text-emerald-300" /></div><div className="mt-6 space-y-3">{[
       ['Identity and payout verification', 'Required before any earnings accrue', false],
       ['Cryptographic agent enrollment', 'Short-lived credentials and signed heartbeats', false],
