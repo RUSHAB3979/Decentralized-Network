@@ -133,7 +133,7 @@ export default function DesktopApp() {
           <div>
             <p className="text-xs font-medium text-amber-100/90">This machine cannot serve paid work</p>
             <p className="mt-1 text-[11px] leading-5 text-amber-100/50">
-              {!gpu && 'No NVIDIA GPU was detected, so inference would run on the CPU at a fraction of the speed. '}
+              {!gpu && 'No GPU could be read from this machine, so inference would run on the CPU at a fraction of the speed. '}
               {!ollama.reachable && 'The Ollama runtime is not reachable. '}
               Earnings stay at zero until this is resolved.
             </p>
@@ -159,8 +159,9 @@ export default function DesktopApp() {
             </>
           ) : (
             <p className="text-[11px] leading-5 text-slate-600">
-              No NVIDIA GPU detected. <span className="text-slate-500">nvidia-smi</span> is not present,
-              which means there is no CUDA device for the runtime to use.
+              No GPU could be read. Either this machine has no NVIDIA card, or
+              <span className="text-slate-500"> nvidia-smi</span> could not be found to ask.
+              Reinstalling the NVIDIA driver is the usual fix if you know a card is fitted.
             </p>
           )}
         </Card>

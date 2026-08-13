@@ -22,7 +22,6 @@ Output:
 from __future__ import annotations
 
 import argparse
-import ctypes
 import importlib.util
 import json
 import platform

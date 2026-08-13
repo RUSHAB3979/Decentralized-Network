@@ -133,14 +133,53 @@ def detect_host() -> Host:
     )
 
 
+def _nvidia_smi() -> str | None:
+    """Absolute path to nvidia-smi, or None if it is not on this machine.
+
+    PATH alone is not enough, and assuming it was cost us a real provider.
+    Current driver packages install nvidia-smi into System32, which is always
+    on PATH; older ones install it only under Program Files\\NVIDIA
+    Corporation\\NVSMI, which is not. A machine with a working GPU can
+    therefore be running a tool we simply fail to find, and reporting that as
+    "no NVIDIA GPU" tells the provider to fix hardware that was never broken.
+
+    Verified on a GeForce RTX 3050 laptop, 2026-08-13: the GPU and driver were
+    both present and the card was absent from the dashboard purely because
+    nvidia-smi was not on PATH.
+
+    Paths are built from the environment rather than hardcoded to C:, because
+    a wrong absolute path fails exactly the way a missing file does - silently.
+    """
+    found = shutil.which("nvidia-smi")
+    if found:
+        return found
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    for candidate in (
+        os.path.join(program_files, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+        os.path.join(system_root, "System32", "nvidia-smi.exe"),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def detect_gpu() -> Gpu | None:
-    """Live GPU state from nvidia-smi. None means no NVIDIA GPU, not a failure."""
-    if shutil.which("nvidia-smi") is None:
+    """Live GPU state from nvidia-smi.
+
+    None means we could not read a GPU - either because there is none, or
+    because the tooling that reads it could not be found or run. Those are
+    different facts and only the first is a property of the hardware, so treat
+    None as "not rentable right now", never as proof the machine has no card.
+    """
+    binary = _nvidia_smi()
+    if binary is None:
         return None
     try:
         out = winproc.run(
             [
-                "nvidia-smi",
+                binary,
                 "--query-gpu=name,memory.total,memory.used,utilization.gpu,"
                 "temperature.gpu,driver_version",
                 "--format=csv,noheader,nounits",

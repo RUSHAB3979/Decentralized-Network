@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -85,9 +86,45 @@ class Report:
     wall_s: dict[int, float] = field(default_factory=dict)
 
 
+def nvidia_smi() -> str | None:
+    """Absolute path to nvidia-smi, or None if it is not on this machine.
+
+    A duplicate of agent/telemetry.py's `_nvidia_smi`, and it has to be. This
+    file is run standalone, so it cannot import from the package - the same
+    constraint documented on the subprocess call below. Fix both or neither.
+
+    PATH alone is not enough. Current drivers install nvidia-smi into System32,
+    which is on PATH; older ones install it only under Program Files\\NVIDIA
+    Corporation\\NVSMI, which is not. A GeForce RTX 3050 laptop hit exactly
+    that on 2026-08-13 and reported no GPU with the card working fine, so
+    treating "tool not found" as "no GPU" produces a bench run that silently
+    measures the wrong machine.
+    """
+    found = shutil.which("nvidia-smi")
+    if found:
+        return found
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    for candidate in (
+        os.path.join(program_files, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+        os.path.join(system_root, "System32", "nvidia-smi.exe"),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def detect_gpu() -> Gpu | None:
-    """Read the GPU from nvidia-smi. Absent driver is a normal outcome, not a crash."""
-    if shutil.which("nvidia-smi") is None:
+    """Read the GPU from nvidia-smi.
+
+    None means we could not read one - either there is no card, or the tool
+    that reads it could not be found. Only the first is a fact about the
+    hardware, so a None here must never be reported as "this machine has no
+    GPU"; the bench header says "unknown" for that reason.
+    """
+    binary = nvidia_smi()
+    if binary is None:
         return None
     try:
         # Deliberately not routed through agent/winproc.py, unlike every other
@@ -99,7 +136,7 @@ def detect_gpu() -> Gpu | None:
         # gets called from the windowed app, this has to change.
         out = subprocess.run(
             [
-                "nvidia-smi",
+                binary,
                 "--query-gpu=name,memory.total,driver_version",
                 "--format=csv,noheader,nounits",
             ],
@@ -229,8 +266,10 @@ async def main() -> int:
 
     gpu = detect_gpu()
     if gpu is None:
-        print("gpu    : no nvidia-smi  -  CPU or non-NVIDIA. Numbers will not be")
-        print("         representative of a provider machine.")
+        print("gpu    : unknown  -  nvidia-smi was not found, so this run cannot")
+        print("         tell whether the machine has a GPU. If it does, the")
+        print("         numbers below are still measuring it; if it does not,")
+        print("         they are CPU numbers. Either way they are unlabelled.")
     else:
         print(f"gpu    : {gpu.name}  {gpu.vram_total_mb} MB  driver {gpu.driver}")
 
