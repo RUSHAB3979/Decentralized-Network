@@ -25,6 +25,7 @@ export function useProviderNodes(pollMs = NODE_POLL_MS) {
                 status: 'ok',
                 nodes: response.nodes,
                 ttlSeconds: response.ttlSeconds,
+                serverTime: response.serverTime,
             }
             : {
                 status: 'error',
