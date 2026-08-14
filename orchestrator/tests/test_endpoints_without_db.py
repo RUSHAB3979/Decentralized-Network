@@ -90,3 +90,104 @@ def test_ttl_is_comfortably_longer_than_the_heartbeat_interval():
     # and nothing in the system would raise -- the marketplace would just
     # appear empty. Three intervals leaves room for two dropped requests.
     assert ttl().total_seconds() >= heartbeat_interval_s() * 3
+
+
+# ---------------------------------------------------------------------------
+# Accounts and the work queue, with no database.
+#
+# Same principle as the tests above: CI cannot prove a user was stored, but it
+# can prove what every new endpoint does when storage is gone. These paths run
+# during an incident, and the agent's retry loop is built on the codes they
+# return.
+# ---------------------------------------------------------------------------
+
+SIGNUP = {"email": "provider@example.com", "password": "a-long-enough-password"}
+
+
+def test_signup_returns_503_not_500(client):
+    response = client.post("/v1/auth/signup", json=SIGNUP)
+    assert response.status_code == 503
+
+
+def test_login_returns_503_not_500(client):
+    response = client.post("/v1/auth/login", json=SIGNUP)
+    assert response.status_code == 503
+
+
+def test_signup_validates_before_touching_storage(client):
+    # A short password must be a 422 even with no database at all. If this were
+    # a 503, it would mean weak passwords were reaching the hasher and the table
+    # whenever Postgres happened to be up.
+    response = client.post(
+        "/v1/auth/signup", json={"email": "a@b.co", "password": "short"}
+    )
+    assert response.status_code == 422
+
+
+def test_signup_rejects_a_malformed_email_before_storage(client):
+    response = client.post(
+        "/v1/auth/signup", json={"email": "not-an-email", "password": "a-long-password"}
+    )
+    assert response.status_code == 422
+
+
+def test_authenticated_endpoints_reject_a_missing_header_before_storage(client):
+    # 401 rather than 503: the request is unauthenticated regardless of whether
+    # the database is reachable, and answering 503 would tell an anonymous
+    # caller about our infrastructure.
+    assert client.get("/v1/auth/me").status_code == 401
+    assert client.get("/v1/api-keys").status_code == 401
+    assert client.post("/v1/api-keys", json={"name": "k"}).status_code == 401
+
+
+def test_work_endpoints_reject_a_missing_credential_before_storage(client):
+    claim = client.post("/providers/work/claim", params={"node_id": NODE_ID})
+    assert claim.status_code == 401
+
+    result = client.post(
+        f"/providers/work/{'job_x'}/result",
+        params={"node_id": NODE_ID},
+        json={"status": "completed"},
+    )
+    assert result.status_code == 401
+
+
+def test_chat_completions_rejects_a_missing_key_before_storage(client):
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 401
+
+
+def test_streaming_is_refused_before_authentication(client):
+    # Cheapest possible rejection of something we cannot do. Checked before the
+    # key lookup so an unsupported request never costs a database round trip.
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer nf_demo_whatever"},
+        json={
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_job_lease_outlives_the_claim_wait():
+    # If a lease could expire while an agent was still holding the claim open,
+    # work would be reassigned to a second provider before the first had a
+    # chance to start it -- and the customer would pay for two runs of one
+    # request. Nothing would raise; the bill would simply be wrong.
+    from orchestrator.main import claim_wait_s, job_lease_s
+
+    assert job_lease_s() > claim_wait_s()
+
+
+def test_dispatch_wait_outlives_a_single_claim_cycle():
+    # The customer must not be given up on faster than an idle agent can come
+    # back and take the job.
+    from orchestrator.main import claim_wait_s, dispatch_wait_s
+
+    assert dispatch_wait_s() > claim_wait_s()

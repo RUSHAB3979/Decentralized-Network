@@ -26,7 +26,7 @@ import threading
 
 from dotenv import load_dotenv
 
-from agent import reporter
+from agent import reporter, worker
 from agent.runtime.ollama import OllamaError, OllamaSupervisor
 from agent.state import ProviderState, Status
 from agent.ui import tray, window
@@ -82,13 +82,17 @@ def main() -> int:
     accepting.set()
     stop = threading.Event()
 
-    worker = threading.Thread(
+    # Named for what it does, not for what it is. The bare name `worker` used
+    # to live here and now belongs to the agent.worker module imported above --
+    # leaving it would shadow the module and make `worker.run` resolve to a
+    # Thread, which fails at runtime rather than at import.
+    supervisor_thread = threading.Thread(
         target=_supervise,
         args=(state, supervisor, accepting, stop),
         name="supervisor",
         daemon=True,
     )
-    worker.start()
+    supervisor_thread.start()
 
     # Separate thread from the supervisor on purpose. Reporting is network I/O
     # against a machine we do not control, and a slow orchestrator must never
@@ -100,6 +104,20 @@ def main() -> int:
         daemon=True,
     )
     telemetry_reporter.start()
+
+    # A third thread, separate from both of the above. It has to be separate
+    # from the reporter because a job can run for minutes and heartbeats must
+    # keep flowing while it does -- sharing a thread would make a busy node look
+    # offline exactly when it is earning. And separate from the supervisor
+    # because noticing that Ollama died must not wait behind a request being
+    # served by Ollama.
+    job_worker = threading.Thread(
+        target=worker.run,
+        args=(state, supervisor, accepting, stop),
+        name="worker",
+        daemon=True,
+    )
+    job_worker.start()
 
     def on_drain_change(should_accept: bool) -> None:
         accepting.set() if should_accept else accepting.clear()
@@ -115,13 +133,18 @@ def main() -> int:
 
     def on_quit() -> None:
         stop.set()
-        worker.join(timeout=5)
+        supervisor_thread.join(timeout=5)
         # Bounded like the supervisor join. Both threads are daemons, so a
         # request still in flight cannot hold the process open past this; the
         # orchestrator will age the node out via TTL rather than being told.
         # A clean deregister is a later milestone - it needs a credential,
         # or anyone could deregister anyone.
         telemetry_reporter.join(timeout=5)
+        # Bounded like the others. A job still running at this point is
+        # abandoned: its lease lapses server-side and another provider picks it
+        # up. Waiting for it would mean a provider who clicked Quit watches a
+        # spinner for the length of someone else's inference request.
+        job_worker.join(timeout=5)
         # Only stops a server this process started; an Ollama the provider was
         # already running is left alone. See runtime/ollama.py.
         supervisor.stop()

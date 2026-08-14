@@ -141,6 +141,19 @@ class Reporter:
         response.raise_for_status()
         body = response.json()
         self.interval_s = float(body.get("heartbeat_interval_s") or DEFAULT_INTERVAL_S)
+
+        # The credential is returned exactly once, here. Persisting it is what
+        # lets agent/worker.py claim jobs; without it the node registers,
+        # heartbeats, and is visible on the marketplace but can never be given
+        # work. An orchestrator too old to issue one sends nothing, and the
+        # worker degrades to idling rather than erroring.
+        token = body.get("node_token")
+        if token:
+            if not identity.store_node_token(token):
+                print(
+                    "[reporter] could not save the node credential; "
+                    "this machine will not be offered work"
+                )
         self.registered = True
         print(
             f"[reporter] registered {self.node_id} with {self.base_url} "

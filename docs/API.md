@@ -2,29 +2,101 @@
 
 Base URL (local): `http://localhost:8080`
 
-## Local Rented-Inference Demo
+## Accounts
 
 Customer-facing base URL: `http://localhost:8080/v1`
 
-This local-only vertical slice uses a Bearer API key at the orchestrator. The
-orchestrator verifies the key, chooses the provider configured by
-`DEMO_PROVIDER_NODE_ID`, forwards the request to local Ollama, and stores only
-usage metadata. It does not store prompts or responses and never sends the
-reusable customer key to the provider.
+API keys belong to an account. Key administration used to be gated on the caller
+being loopback with `LOCAL_DEMO_MODE=true`, which is a deployment posture rather
+than an identity -- everyone arriving from the right address was the same
+anonymous customer, and the key they made belonged to nobody.
+
+Passwords are stored as scrypt digests with per-row salts and self-describing
+cost parameters. Sessions are opaque random tokens stored as digests; validity
+is derived from the row at read time, so logout is immediate and expiry needs no
+background job.
+
+### `POST /v1/auth/signup`
+
+Creates an account and returns a session in one step. Email is trimmed and
+lowercased before validation, so `You@Example.COM ` and `you@example.com` are
+one account. `409` if the address is taken. Minimum password length is 10.
+
+### `POST /v1/auth/login`
+
+Exchanges email and password for a session token. Returns `401` for both an
+unknown address and a wrong password, with the same message and the same
+response time -- an early return for unknown accounts would make the endpoint a
+membership oracle for anyone with a stopwatch.
+
+### `POST /v1/auth/logout`
+
+Revokes the presented session. `204`, and idempotent.
+
+### `GET /v1/auth/me`
+
+The current account. `401` when the session is missing, expired or revoked.
+
+## Rented Inference
+
+Inference runs on a **provider's machine**, not on the orchestrator.
+
+The orchestrator authenticates the customer key, picks an online provider that
+advertises the model, and writes a job. The provider's agent claims that job
+over a connection it opened itself, runs it against its own Ollama, and posts
+the result back; the waiting customer request returns it. The agent asks for
+work rather than being handed it because a provider's PC sits behind a home
+router with no address the orchestrator could dial.
+
+The customer's API key terminates at the orchestrator. The job envelope handed
+to a provider carries a model and messages and has no field for a credential.
+
+Prompts and responses are not stored. `inference_requests` keeps usage metadata
+as evidence of what a runtime reported; it is **not** a bill. Turning those
+counts into an amount owed is metering, which is hand-built under ADR 0002 and
+lives in `agent/core/meter.py`.
 
 ### `POST /v1/api-keys`
 
-Creates a local demo customer key. This endpoint works only when
-`LOCAL_DEMO_MODE=true` and the caller is on loopback. The plaintext key is
-returned once; the database stores only its SHA-256 hash.
+Creates a key owned by the logged-in account. Requires a session token. The
+plaintext key is returned once; only its SHA-256 digest is stored.
 
 ### `GET /v1/api-keys`
 
-Lists key metadata without exposing plaintext keys.
+Lists the calling account's keys. Never returns plaintext.
 
 ### `DELETE /v1/api-keys/{key_id}`
 
-Revokes a key. This is also restricted to local demo administration.
+Revokes a key the calling account owns. `404` for a key belonging to somebody
+else -- deliberately the same response as a key that does not exist, so the
+endpoint cannot be used to probe for other people's key ids.
+
+## Provider Work Queue
+
+Agent-facing. Authenticated with the node credential returned once by
+`POST /providers/register`.
+
+Scope note: that credential authenticates the transport and nothing more. Secure
+storage on the provider's machine, rotation, and binding the credential to the
+hardware are `agent/core/creds.py`'s job -- hand-built under ADR 0002 and still
+unwritten. The agent currently keeps the token in a plaintext file.
+
+### `POST /providers/work/claim?node_id=...`
+
+Returns at most one job, or `{"job": null}` when there is nothing to do. Held
+open for `CLAIM_WAIT_SEC` so an idle fleet is not polling constantly.
+
+A job is claimable when it is queued, or when it was claimed and its lease has
+lapsed. Expiry is derived at read time -- there is no sweeper, because a sweeper
+that died would strand every in-flight job in `claimed` forever with nothing
+raising. Concurrent claims are serialised with `FOR UPDATE SKIP LOCKED`, so two
+agents asking at the same instant cannot receive the same job.
+
+### `POST /providers/work/{job_id}/result?node_id=...`
+
+Terminal, accepted once, and only from the node holding the claim. `409` if the
+lease already lapsed and the job went elsewhere -- the agent should drop the
+result rather than retry.
 
 ### `GET /v1/models`
 

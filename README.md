@@ -245,29 +245,61 @@ invented hardware.
 - Kill the orchestrator while the agent runs. The agent must keep retrying with
   backoff and reconnect on its own; it should never need restarting.
 
-### 7. Run the local rented-inference demo
+### 7. Run rented inference
 
-Keep `LOCAL_DEMO_MODE=false` outside local development. For the single-machine
-demo, set these values in `.env`:
+Inference runs **on the provider's machine**, not on the orchestrator. The
+orchestrator queues a job for a chosen node; that node's agent claims it over a
+connection it opened itself, runs it against its own Ollama, and posts the
+result back. That direction matters: a provider's PC sits behind a home router
+with no address the server could dial.
 
-```dotenv
-LOCAL_DEMO_MODE=true
-DEMO_PROVIDER_NODE_ID=your-stable-provider-node-id
-LOCAL_OLLAMA_URL=http://127.0.0.1:11434
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-```
+There is no longer a `LOCAL_DEMO_MODE`, a `DEMO_PROVIDER_NODE_ID`, or a
+`LOCAL_OLLAMA_URL` on the orchestrator. Any online provider that advertises the
+model is eligible, and API keys belong to a real account instead of to whoever
+reached the box from localhost.
 
-Print this machine's stable provider id with:
+**Create an account and a key.**
 
 ```powershell
-.\agent\env\Scripts\python.exe -c "from agent.identity import node_id; print(node_id())"
+$body = @{ email = "you@example.com"; password = "a-long-enough-password" } | ConvertTo-Json
+$session = Invoke-RestMethod -Method Post -Uri http://localhost:8080/v1/auth/signup `
+    -ContentType application/json -Body $body
+$headers = @{ Authorization = "Bearer $($session.token)" }
+
+$key = Invoke-RestMethod -Method Post -Uri http://localhost:8080/v1/api-keys `
+    -ContentType application/json -Headers $headers -Body (@{ name = "my key" } | ConvertTo-Json)
+$key.key    # shown once, never retrievable again
 ```
 
-Start Postgres, the orchestrator, the provider agent, and the web client. Open
-`http://localhost:3000/Decentralized-Network/#/app/models`, create an API key,
-select a local model, and send a prompt from the Playground. The customer uses
-base URL `http://localhost:8080/v1`; the provider receives only the request,
-never the reusable customer key.
+**Start a provider.** Run the agent (`python -m agent.app`). On registration it
+receives a node credential, saves it beside its node id in `%LOCALAPPDATA%`, and
+its worker thread begins asking for work. The tray's drain toggle stops new
+claims immediately.
+
+**Send a request.** Base URL is `http://localhost:8080/v1`, so any
+OpenAI-compatible client works:
+
+```powershell
+$body = @{
+    model = "tinyllama:latest"
+    messages = @(@{ role = "user"; content = "hello" })
+} | ConvertTo-Json -Depth 4
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/v1/chat/completions `
+    -ContentType application/json -Headers @{ Authorization = "Bearer $($key.key)" } -Body $body
+```
+
+The provider receives the model and the messages, and nothing else — the
+customer's key terminates at the orchestrator and is never forwarded.
+
+**Run the failure cases too.** They are the half worth seeing:
+
+- Toggle the tray to draining, then send a request → `503`, no provider
+  accepting.
+- Ask for a model no provider has → `404`.
+- Stop the agent mid-request → `504` after `DISPATCH_WAIT_SEC`, and the job
+  stays queued rather than being lost. Restart the agent and it is picked up.
+- Restart the agent → its credential rotates, and the previous one stops
+  working.
 
 The demo intentionally lacks provider authentication, TLS, sandboxing,
 payments, rate limits, multi-provider scheduling, and failover. Do not expose
