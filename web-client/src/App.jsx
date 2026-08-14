@@ -17,6 +17,7 @@ import WorkstationPage from './components/app/WorkstationPage';
 import GamingPage from './components/app/GamingPage';
 import ProviderConsolePage from './components/app/ProviderConsolePage';
 import BillingPage from './components/app/BillingPage';
+import { useSession } from './hooks/useSession';
 /**
  * NodeForge — liquid-GPU landing page.
  * Art direction: obsidian canvas, iridescent fluid ribbon, wireframe globe,
@@ -35,6 +36,10 @@ const App = () => {
         return relativePath.replace(/\/$/, '') || '/';
     };
     const [route, setRoute] = useState(getRoute);
+    // Called unconditionally, before any early return: React requires hooks to
+    // run in the same order on every render, and the /login branch below returns
+    // early.
+    const session = useSession();
     useEffect(() => {
         const syncRoute = () => setRoute(getRoute());
         window.addEventListener('hashchange', syncRoute);
@@ -53,6 +58,33 @@ const App = () => {
         return <AuthPage initialMode={route === '/signup' ? 'signup' : 'login'}/>;
     }
     if (route.startsWith('/app')) {
+        // The dashboard reads the signed-in account's keys, so rendering it for
+        // an anonymous visitor means every panel 401s. Three states, not two:
+        // 'loading' must not render the app *or* bounce to login, because the
+        // stored token has not been checked yet and doing either produces a
+        // visible flash of the wrong page on every reload.
+        if (session.status === 'loading') {
+            return (<div className="grid min-h-[100svh] place-items-center bg-[#03040c] text-slate-500">
+        <p className="font-mono text-[11px] uppercase tracking-[0.24em]">Restoring session…</p>
+      </div>);
+        }
+        if (session.status === 'anonymous') {
+            return <AuthPage initialMode="login"/>;
+        }
+        if (session.status === 'error') {
+            // The session may be perfectly valid; we could not check it. Saying
+            // "signed out" here would be a guess, and the wrong one -- it would
+            // send someone to re-enter a password that is not the problem.
+            return (<div className="grid min-h-[100svh] place-items-center bg-[#03040c] px-6 text-center">
+        <div className="max-w-md">
+          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-amber-300">Orchestrator unreachable</p>
+          <p className="mt-4 text-sm leading-6 text-slate-400">{session.error}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Your session has not been ended — this is a connection problem. Start the orchestrator and try again.</p>
+          <button type="button" onClick={session.refresh} className="btn-liquid mt-7 !inline-flex !py-3">Retry</button>
+        </div>
+      </div>);
+        }
+
         let page = <MarketplaceDashboard onNavigate={navigate}/>;
         if (route === '/app/render') page = <RenderJobPage onNavigate={navigate}/>;
         if (route === '/app/models') page = <ModelApiPage onNavigate={navigate}/>;
@@ -60,7 +92,7 @@ const App = () => {
         if (route === '/app/gaming') page = <GamingPage onNavigate={navigate}/>;
         if (route === '/app/provider') page = <ProviderConsolePage onNavigate={navigate}/>;
         if (route === '/app/billing') page = <BillingPage onNavigate={navigate}/>;
-        return <AppShell currentRoute={route} onNavigate={navigate}>{page}</AppShell>;
+        return <AppShell currentRoute={route} onNavigate={navigate} session={session}>{page}</AppShell>;
     }
     return (<div className="relative min-h-screen bg-[#03040c]">
     <GlowCursor />
