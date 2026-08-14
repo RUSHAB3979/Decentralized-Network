@@ -81,8 +81,29 @@ export const MOCK_CATALOG = [
 // TypeScript orchestrator listens on 8080 and uvicorn defaults to 8000, so the
 // port is configuration rather than a constant.
 // ---------------------------------------------------------------------------
+// Where the orchestrator lives, resolved in three steps.
+//
+// An explicit VITE_ORCHESTRATOR_URL always wins -- that is how you point a build
+// at a staging backend, or at a colleague's machine.
+//
+// Otherwise it depends on where this page is being served from, because the
+// answer genuinely differs. Running `npm run dev` on your laptop, the backend is
+// on your laptop. Served from a deployed origin, it is the deployed backend --
+// and hardcoding localhost there produced a site whose every request was blocked
+// as mixed content before it left the browser, with the honest but unhelpful
+// message "Cannot reach the orchestrator" for every visitor.
+//
+// The hosted URL is not a secret: it is a public API endpoint that appears in
+// every request this bundle makes. Committing it is correct, and .env files are
+// gitignored precisely so that things which *are* secret cannot follow it here.
+const HOSTED_ORCHESTRATOR_URL = 'https://nodeforge-orchestrator.onrender.com';
+
+const isLocal = typeof window !== 'undefined'
+    && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+
 export const ORCHESTRATOR_URL =
-    import.meta.env.VITE_ORCHESTRATOR_URL ?? 'http://localhost:8080';
+    import.meta.env.VITE_ORCHESTRATOR_URL
+    ?? (isLocal ? 'http://localhost:8080' : HOSTED_ORCHESTRATOR_URL);
 
 export async function checkOrchestratorHealth() {
     const controller = new AbortController();

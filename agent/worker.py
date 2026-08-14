@@ -11,9 +11,16 @@ behind carrier-grade NAT on top of that. It has no address the orchestrator
 could dial, and asking a provider to forward a port is asking most of them to
 uninstall the app. So every byte travels over a connection this process opened.
 
-The orchestrator holds the claim request open when there is nothing to do
-(long-polling), which is why the request timeout below is generous: an empty
-response after twenty seconds of waiting is the *normal* case, not a fault.
+The claim endpoint answers immediately -- it does not hold the request open --
+so this loop is a poll, not a long-poll, and it must wait between attempts.
+Without that wait it spins as fast as the network allows: constant database load
+from a fleet doing nothing, and on a metered host, a bill. The server sets the
+interval so it can be changed for every provider at once.
+
+Real long-polling would cut the latency between a job being queued and being
+picked up, and LISTEN/NOTIFY would cut it further. Both need the orchestrator to
+hold a connection per waiting agent, which is a different hosting shape --
+worth doing when idle latency matters more than portability.
 
 What this deliberately does not do
 ----------------------------------
@@ -41,11 +48,11 @@ from agent import identity
 from agent.runtime.ollama import OllamaSupervisor
 from agent.state import ProviderState, Status
 
-# Longer than the orchestrator's CLAIM_WAIT_SEC (20s by default) plus its
-# database time. The claim endpoint holds the request open on purpose, so a
-# client timeout below that would turn every idle poll into an error and, with
-# retries, into a request storm against a server that is behaving correctly.
-CLAIM_TIMEOUT_S = 45.0
+# The claim endpoint returns immediately, so this only has to cover a slow
+# network and the orchestrator's own database time -- its connect timeout is 5s,
+# so 20 leaves room for a slow query on top without turning a healthy-but-slow
+# server into an error.
+CLAIM_TIMEOUT_S = 20.0
 
 # Sized for a model that has to be read off disk into VRAM before it can answer.
 # A cold start on a consumer card is tens of seconds, and a timeout under it
@@ -54,6 +61,12 @@ RUN_TIMEOUT_S = 600.0
 
 # Submitting a result is a small request against an endpoint that only writes.
 RESULT_TIMEOUT_S = 30.0
+
+# How long to wait between claims when there is no work, until the server says
+# otherwise. Short enough that a customer is not waiting on the poll before
+# their job is even picked up; long enough that an idle fleet is not a
+# self-inflicted denial of service.
+DEFAULT_POLL_INTERVAL_S = 3.0
 
 # Applied when the orchestrator is unreachable or answering with 5xx. Same shape
 # as reporter.py's backoff and for the same reason: a provider whose router
@@ -80,6 +93,8 @@ class Worker:
         self.supervisor = supervisor
         self.base_url = (base_url or orchestrator_url()).rstrip("/")
         self.node_id = identity.node_id()
+        # Overwritten by the server's answer on the first successful claim.
+        self.poll_interval = DEFAULT_POLL_INTERVAL_S
 
     # -- credential -------------------------------------------------------
     #
@@ -99,7 +114,11 @@ class Worker:
     # -- one cycle --------------------------------------------------------
 
     def claim(self, client: httpx.Client) -> dict | None:
-        """Ask for a job. `None` means there is nothing to do, which is normal."""
+        """Ask for a job. `None` means there is nothing to do, which is normal.
+
+        Also records the server's requested poll interval in `self.poll_interval`
+        so the caller can pace itself from it.
+        """
         headers = self._auth_header()
         if headers is None:
             return None
@@ -119,7 +138,11 @@ class Worker:
             identity.clear_node_token()
             return None
         response.raise_for_status()
-        return response.json().get("job")
+        body = response.json()
+        interval = body.get("poll_interval_s")
+        if isinstance(interval, (int, float)) and interval > 0:
+            self.poll_interval = float(interval)
+        return body.get("job")
 
     def run(self, job: dict, runtime: httpx.Client | None = None) -> dict:
         """Execute one job against the local runtime and shape the result.
@@ -217,6 +240,7 @@ def run(
     """
     worker = Worker(state, supervisor, base_url)
     backoff = MIN_BACKOFF_S
+    poll_interval = worker.poll_interval
 
     with httpx.Client() as client:
         while not stop.is_set():
@@ -232,6 +256,7 @@ def run(
             try:
                 job = worker.claim(client)
                 backoff = MIN_BACKOFF_S
+                poll_interval = worker.poll_interval
             except (httpx.HTTPError, ValueError, OSError) as exc:
                 print(f"[worker] cannot claim work: {exc.__class__.__name__}: {exc}")
                 if stop.wait(backoff):
@@ -240,9 +265,20 @@ def run(
                 continue
 
             if not job:
-                # The orchestrator held the request open and had nothing. Go
-                # straight back rather than sleeping: the wait already happened
-                # on the server.
+                # Nothing to do. Wait before asking again.
+                #
+                # This sleep is load-bearing, and its absence was a bug: the
+                # claim endpoint answers immediately rather than holding the
+                # request open, so a bare `continue` here spins as fast as the
+                # network allows. On a metered host that is a bill rather than a
+                # crash, and on any host it is constant database load produced
+                # by a fleet that is doing nothing.
+                #
+                # The server sets the pace via poll_interval_s, so it can be
+                # changed for every provider at once without shipping a new
+                # desktop build.
+                if stop.wait(poll_interval):
+                    return
                 continue
 
             job_id = job.get("job_id")

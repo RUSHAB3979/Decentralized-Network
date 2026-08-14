@@ -180,14 +180,14 @@ def test_job_lease_outlives_the_claim_wait():
     # work would be reassigned to a second provider before the first had a
     # chance to start it -- and the customer would pay for two runs of one
     # request. Nothing would raise; the bill would simply be wrong.
-    from orchestrator.main import claim_wait_s, job_lease_s
+    from orchestrator.main import claim_poll_interval_s, job_lease_s
 
-    assert job_lease_s() > claim_wait_s()
+    assert job_lease_s() > claim_poll_interval_s()
 
 
 def test_dispatch_wait_outlives_a_single_claim_cycle():
     # The customer must not be given up on faster than an idle agent can come
     # back and take the job.
-    from orchestrator.main import claim_wait_s, dispatch_wait_s
+    from orchestrator.main import claim_poll_interval_s, dispatch_wait_s
 
-    assert dispatch_wait_s() > claim_wait_s()
+    assert dispatch_wait_s() > claim_poll_interval_s()

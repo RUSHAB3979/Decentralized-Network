@@ -921,14 +921,21 @@ def job_lease_s() -> int:
         return 180
 
 
-# How long the agent holds a claim request open when there is nothing to do.
-# Long-polling rather than fast polling: an idle fleet of a thousand agents at
-# one request per second is a thousand requests per second of pure nothing.
-def claim_wait_s() -> int:
+# How long an agent should wait between claim attempts when there is no work.
+# Sent to the agent rather than compiled into it, so the whole fleet's polling
+# rate can be changed without shipping a new desktop build.
+#
+# This endpoint answers immediately; it does not hold the request open. The
+# interval is therefore the floor on how long a queued job waits before anyone
+# picks it up, and also what stops an idle fleet from becoming a self-inflicted
+# denial of service. Three seconds is the compromise. Long-polling or
+# LISTEN/NOTIFY would beat it on both counts and needs a held connection per
+# waiting agent, which is a hosting decision rather than a code one.
+def claim_poll_interval_s() -> int:
     try:
-        return max(1, int(os.getenv("CLAIM_WAIT_SEC", "20")))
+        return max(1, int(os.getenv("CLAIM_POLL_INTERVAL_SEC", "3")))
     except ValueError:
-        return 20
+        return 3
 
 
 # How long a customer's request waits for its job to come back before giving up.
@@ -1005,7 +1012,7 @@ def claim_work(
     # finishing something it already holds, which is why this refuses new claims
     # rather than cancelling the lease.
     if not node["accepts_work"]:
-        return JobClaimResponse(job=None, poll_interval_s=claim_wait_s())
+        return JobClaimResponse(job=None, poll_interval_s=claim_poll_interval_s())
 
     lease_until = now + timedelta(seconds=job_lease_s())
     try:
@@ -1038,7 +1045,7 @@ def claim_work(
         raise _unavailable(exc) from exc
 
     if not row:
-        return JobClaimResponse(job=None, poll_interval_s=claim_wait_s())
+        return JobClaimResponse(job=None, poll_interval_s=claim_poll_interval_s())
 
     return JobClaimResponse(
         job=JobOffer(
@@ -1047,7 +1054,7 @@ def claim_work(
             payload=JobPayload(**row["payload"]),
             lease_expires_at=row["lease_expires_at"],
         ),
-        poll_interval_s=claim_wait_s(),
+        poll_interval_s=claim_poll_interval_s(),
     )
 
 

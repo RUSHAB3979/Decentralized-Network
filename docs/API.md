@@ -83,8 +83,11 @@ unwritten. The agent currently keeps the token in a plaintext file.
 
 ### `POST /providers/work/claim?node_id=...`
 
-Returns at most one job, or `{"job": null}` when there is nothing to do. Held
-open for `CLAIM_WAIT_SEC` so an idle fleet is not polling constantly.
+Returns at most one job, or `{"job": null}` when there is nothing to do, and
+answers immediately -- it does not hold the request open. The response carries
+`poll_interval_s` (`CLAIM_POLL_INTERVAL_SEC`, default 3), and the agent waits
+that long before asking again. Without that wait the agent spins: constant load
+from a fleet doing nothing, and on metered hosting, a bill.
 
 A job is claimable when it is queued, or when it was claimed and its lease has
 lapsed. Expiry is derived at read time -- there is no sweeper, because a sweeper

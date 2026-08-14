@@ -14,6 +14,8 @@ providers has to delete an assertion to do it.
 
 from __future__ import annotations
 
+import threading
+
 import httpx
 import pytest
 
@@ -189,3 +191,52 @@ def test_a_failed_run_still_produces_a_reportable_result():
     with httpx.Client(transport=httpx.MockTransport(failing)) as runtime:
         with pytest.raises(httpx.HTTPError):
             w.run(_job(), runtime=runtime)
+
+
+def test_the_loop_waits_between_empty_claims(monkeypatch):
+    """The regression guard for a busy loop.
+
+    The claim endpoint answers immediately -- it does not hold the request open
+    -- so the loop has to wait between attempts itself. It once did not, and the
+    symptom is not a crash: the agent simply asks as fast as the network allows,
+    producing constant database load from a fleet that is doing nothing and, on
+    metered hosting, a bill. Nothing raises, which is exactly why this needs a
+    test rather than a comment.
+    """
+    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+
+    calls = {"claims": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["claims"] += 1
+        return httpx.Response(200, json={"job": None, "poll_interval_s": 7})
+
+    waits = []
+
+    class RecordingStop(threading.Event):
+        """Records every wait and ends the loop after the first one."""
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            return True  # ends the loop, so the test cannot hang
+
+    accepting = threading.Event()
+    accepting.set()
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_factory(*args, **kwargs):
+        return real_client(transport=transport)
+
+    monkeypatch.setattr(httpx, "Client", client_factory)
+
+    worker.run(
+        ProviderState(), _FakeSupervisor(), accepting, RecordingStop(),
+        base_url="http://orch.invalid",
+    )
+
+    assert calls["claims"] == 1, "claimed more than once without waiting"
+    # And it waited for the interval the *server* asked for, not a local
+    # constant -- that is what lets the fleet be re-paced without a new build.
+    assert waits == [7.0], f"expected a 7s wait from poll_interval_s, got {waits}"

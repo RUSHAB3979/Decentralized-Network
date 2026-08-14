@@ -1,0 +1,96 @@
+# Render Blueprint — the orchestrator and its database.
+#
+# WHY THE BACKEND IS HERE AND NOT ON VERCEL
+#
+# The frontend is a static bundle and belongs on a CDN; it is deployed to
+# Vercel. This service is not, and putting it there would break it in a way
+# that is worth stating rather than discovering:
+#
+#   - `POST /v1/chat/completions` blocks in `_await_job` for up to
+#     DISPATCH_WAIT_SEC (120s) while a provider runs the model. Vercel's
+#     serverless functions cap out below that on the lower tiers, and even where
+#     they do not, you are billed for wall-clock time spent waiting on somebody
+#     else's GPU.
+#   - Providers poll for work continuously. On a per-invocation platform that is
+#     a bill that scales with how *idle* the fleet is, which is the wrong shape.
+#   - psycopg opens a real connection per request. Serverless multiplies that by
+#     concurrent invocations and exhausts Postgres' connection limit without a
+#     pooler in front.
+#
+# A long-running web service is simply the right shape for this process. That is
+# what this file describes.
+#
+# TO DEPLOY: Render dashboard -> New -> Blueprint -> pick this repository.
+# Render reads this file, creates both resources, and wires DATABASE_URL from
+# the database into the service automatically.
+
+databases:
+  - name: nodeforge-db
+    databaseName: marketplace
+    user: marketplace
+    plan: free
+    # Free Postgres on Render is time-limited and is deleted when it expires.
+    # Fine for a demo; move to a paid tier before anyone's provider history
+    # matters, because `registered_at` is the only tenure signal the system has
+    # and it does not survive a dropped database.
+
+services:
+  - type: web
+    name: nodeforge-orchestrator
+    runtime: python
+    plan: free
+    region: oregon
+
+    # Matches CI and .ruff.toml's target-version. The README explains why the
+    # three are pinned together; a host quietly choosing 3.12 is exactly the
+    # "green in CI, broken in production" case that pin exists to prevent.
+    pythonVersion: "3.11"
+
+    buildCommand: pip install -r orchestrator/requirements.txt
+
+    # 0.0.0.0 because the container's port has to be reachable from outside it,
+    # and $PORT because Render assigns it rather than letting the app choose.
+    startCommand: uvicorn orchestrator.main:app --host 0.0.0.0 --port $PORT
+
+    # Readiness, not liveness. /health does a real database round trip, so
+    # Render will not route traffic to an instance whose database is unreachable.
+    # /service would answer 200 from a process that cannot serve anything.
+    healthCheckPath: /health
+
+    envVars:
+      # Wired by Render from the database above. Never written down anywhere.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nodeforge-db
+          property: connectionString
+
+      # The browser origins allowed to call this API. Both frontends are
+      # deployed: Vercel is the primary, GitHub Pages is the existing one.
+      #
+      # These must be the exact scheme and host. A trailing slash, or http://
+      # where the site is https://, produces a CORS rejection that reads like
+      # the backend being down -- the request never arrives and the browser
+      # reports a network failure rather than a policy one.
+      #
+      # Add Vercel preview URLs here too if you want branch deploys to work;
+      # they get their own hostnames and will otherwise be refused.
+      - key: CORS_ORIGINS
+        value: https://nodeforge-console.vercel.app,https://rushab3979.github.io
+
+      # See .env.example for what each of these trades off.
+      - key: HEARTBEAT_SEC
+        value: "15"
+      - key: PROVIDER_TTL_MS
+        value: "120000"
+      - key: SESSION_TTL_DAYS
+        value: "7"
+      - key: JOB_LEASE_SEC
+        value: "180"
+      - key: CLAIM_POLL_INTERVAL_SEC
+        value: "3"
+
+      # Kept under Render's free-tier request ceiling. The customer gets a 504
+      # after this and the job stays queued, so a slow provider costs a retry
+      # rather than a lost request.
+      - key: DISPATCH_WAIT_SEC
+        value: "100"
