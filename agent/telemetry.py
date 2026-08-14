@@ -21,7 +21,6 @@ import socket
 import subprocess
 import shutil
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
 
 import httpx
 
@@ -134,35 +133,53 @@ def detect_host() -> Host:
     )
 
 
-def _find_nvidia_smi() -> Path | None:
-    """Find NVIDIA's utility even when a launcher supplies a reduced PATH."""
-    on_path = shutil.which("nvidia-smi")
-    if on_path:
-        return Path(on_path)
+def _nvidia_smi() -> str | None:
+    """Absolute path to nvidia-smi, or None if it is not on this machine.
 
-    # Windows normally installs this in System32. GUI launchers, packaged apps,
-    # and restricted shells can omit System32 from PATH even though the file
-    # and driver are healthy, which previously produced a false "no GPU".
-    windows_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
-    candidates = [Path(windows_root) / "System32" / "nvidia-smi.exe"]
-    candidates.append(
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-        / "NVIDIA Corporation"
-        / "NVSMI"
-        / "nvidia-smi.exe"
-    )
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
+    PATH alone is not enough, and assuming it was cost us a real provider.
+    Current driver packages install nvidia-smi into System32, which is always
+    on PATH; older ones install it only under Program Files\\NVIDIA
+    Corporation\\NVSMI, which is not. A machine with a working GPU can
+    therefore be running a tool we simply fail to find, and reporting that as
+    "no NVIDIA GPU" tells the provider to fix hardware that was never broken.
+
+    Verified on a GeForce RTX 3050 laptop, 2026-08-13: the GPU and driver were
+    both present and the card was absent from the dashboard purely because
+    nvidia-smi was not on PATH.
+
+    Paths are built from the environment rather than hardcoded to C:, because
+    a wrong absolute path fails exactly the way a missing file does - silently.
+    """
+    found = shutil.which("nvidia-smi")
+    if found:
+        return found
+
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    for candidate in (
+        os.path.join(program_files, "NVIDIA Corporation", "NVSMI", "nvidia-smi.exe"),
+        os.path.join(system_root, "System32", "nvidia-smi.exe"),
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def detect_gpu() -> Gpu | None:
-    """Live GPU state from nvidia-smi. None means no NVIDIA GPU, not a failure."""
-    binary = _find_nvidia_smi()
+    """Live GPU state from nvidia-smi.
+
+    None means we could not read a GPU - either because there is none, or
+    because the tooling that reads it could not be found or run. Those are
+    different facts and only the first is a property of the hardware, so treat
+    None as "not rentable right now", never as proof the machine has no card.
+    """
+    binary = _nvidia_smi()
     if binary is None:
         return None
     try:
         out = winproc.run(
             [
-                str(binary),
+                binary,
                 "--query-gpu=name,memory.total,memory.used,utilization.gpu,"
                 "temperature.gpu,driver_version",
                 "--format=csv,noheader,nounits",
