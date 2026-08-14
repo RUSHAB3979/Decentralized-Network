@@ -96,7 +96,7 @@ export const MOCK_CATALOG = [
 // The hosted URL is not a secret: it is a public API endpoint that appears in
 // every request this bundle makes. Committing it is correct, and .env files are
 // gitignored precisely so that things which *are* secret cannot follow it here.
-const HOSTED_ORCHESTRATOR_URL = 'https://nodeforge-orchestrator.onrender.com';
+const HOSTED_ORCHESTRATOR_URL = 'https://decentralized-network.onrender.com';
 
 const isLocal = typeof window !== 'undefined'
     && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
