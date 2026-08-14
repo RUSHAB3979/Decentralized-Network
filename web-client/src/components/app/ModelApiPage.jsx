@@ -21,6 +21,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { fetchProviderNodes } from '../../services/api';
+import { useSession } from '../../hooks/useSession';
 import {
   INFERENCE_BASE_URL,
   createApiKey,
@@ -145,7 +146,7 @@ const PlaygroundTab = ({ apiKey, models, onUsageChanged }) => {
   if (!apiKey) return <div className="rounded-xl border border-amber-300/15 bg-amber-300/[0.03] p-6 text-sm text-amber-100/70">Create or paste an API key before sending a request.</div>;
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-sm text-slate-200">Send a real inference request</h2><p className="mt-1 text-[10px] text-slate-600">This travels through the authenticated gateway to your local Ollama.</p></div><BrainCircuit className="h-5 w-5 text-violet-300" /></div><label className="mt-5 block text-[10px] text-slate-600">Model<select value={model} onChange={(event) => setModel(event.target.value)} className="mt-2 block w-full rounded-lg border border-white/[0.08] bg-[#0a0c12] p-3 font-mono text-xs text-slate-300 outline-hidden">{models.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}</select></label><label className="mt-4 block text-[10px] text-slate-600">Prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="mt-2 block w-full resize-y rounded-lg border border-white/[0.08] bg-[#0a0c12] p-3 text-xs leading-6 text-slate-300 outline-hidden focus:border-violet-300/30" /></label><button type="button" disabled={busy || !model || !prompt.trim()} onClick={run} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-300 px-4 py-3 text-xs font-semibold text-[#08090a] disabled:opacity-40">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{busy ? 'Running on provider...' : 'Send request'}</button>{error && <p className="mt-3 rounded-lg border border-red-300/20 bg-red-300/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}</section>
+      <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5 sm:p-6"><div className="flex items-center justify-between"><div><h2 className="text-sm text-slate-200">Send a real inference request</h2><p className="mt-1 text-[10px] text-slate-600">Queued for an online provider and run on their GPU. Your key stops at the orchestrator.</p></div><BrainCircuit className="h-5 w-5 text-violet-300" /></div><label className="mt-5 block text-[10px] text-slate-600">Model<select value={model} onChange={(event) => setModel(event.target.value)} className="mt-2 block w-full rounded-lg border border-white/[0.08] bg-[#0a0c12] p-3 font-mono text-xs text-slate-300 outline-hidden">{models.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}</select></label><label className="mt-4 block text-[10px] text-slate-600">Prompt<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} className="mt-2 block w-full resize-y rounded-lg border border-white/[0.08] bg-[#0a0c12] p-3 text-xs leading-6 text-slate-300 outline-hidden focus:border-violet-300/30" /></label><button type="button" disabled={busy || !model || !prompt.trim()} onClick={run} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-300 px-4 py-3 text-xs font-semibold text-[#08090a] disabled:opacity-40">{busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}{busy ? 'Running on provider...' : 'Send request'}</button>{error && <p className="mt-3 rounded-lg border border-red-300/20 bg-red-300/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}</section>
       <section className="rounded-xl border border-white/[0.07] bg-[#0a0c12] p-5 sm:p-6"><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-700">Provider response</p>{response ? <><p className="mt-5 whitespace-pre-wrap text-sm leading-7 text-slate-300">{response.choices[0]?.message?.content}</p><div className="mt-6 grid grid-cols-3 gap-2 border-t border-white/[0.06] pt-4 text-center">{[['Input', response.usage.prompt_tokens], ['Output', response.usage.completion_tokens], ['Total', response.usage.total_tokens]].map(([label, value]) => <div key={label}><p className="font-mono text-sm text-slate-300">{value}</p><p className="mt-1 text-[8px] uppercase tracking-[0.14em] text-slate-700">{label} tokens</p></div>)}</div></> : <div className="flex min-h-72 flex-col items-center justify-center text-center"><BrainCircuit className="h-7 w-7 text-slate-800" /><p className="mt-4 text-xs text-slate-600">The real model response will appear here.</p></div>}</section>
     </div>
   );
@@ -167,6 +168,7 @@ const DocsTab = ({ model }) => {
 };
 
 export default function ModelApiPage({ onNavigate }) {
+  const session = useSession();
   const [activeTab, setActiveTab] = useState('setup');
   const [gatewayStatus, setGatewayStatus] = useState('loading');
   const [provider, setProvider] = useState(null);
@@ -182,8 +184,18 @@ export default function ModelApiPage({ onNavigate }) {
       const [keyResult, nodeResult] = await Promise.all([listApiKeys(), fetchProviderNodes()]);
       setKeys(keyResult.keys ?? []);
       setGatewayStatus('ok');
+      // "Accepting" needs both liveness and the node's own consent. A provider
+      // that is online but draining is not capacity, and showing it as one
+      // would promise a request this page cannot fulfil.
       setProvider(nodeResult.ok ? nodeResult.nodes.find((node) => node.liveness === 'online' && node.accepts_work) ?? null : null);
     } catch (requestError) {
+      // A dead session is not a gateway fault. Signing the user out here is the
+      // honest response: leaving them on a dashboard whose every panel 401s
+      // reads as the site being broken, and re-entering a password fixes it.
+      if (requestError.status === 401) {
+        session.invalidate();
+        return;
+      }
       setGatewayStatus('error');
       setError(requestError.message);
     }
@@ -218,13 +230,22 @@ export default function ModelApiPage({ onNavigate }) {
     finally { setBusy(false); }
   };
 
-  const refreshUsage = async () => { if (apiKey) setUsage(await fetchInferenceUsage(apiKey)); };
+  const refreshUsage = async () => {
+    if (!apiKey) return;
+    try { setUsage(await fetchInferenceUsage(apiKey)); }
+    catch (requestError) {
+      // Clear rather than keep the previous totals. A stale number presented as
+      // current is worse than no number: it is specific, plausible, and wrong.
+      setUsage(null);
+      setError(requestError.message);
+    }
+  };
   const selectedModel = models[0]?.id ?? '';
 
   return (
     <div className="mx-auto max-w-[1480px] px-4 py-7 sm:px-7 lg:px-9 lg:py-10">
       <button type="button" onClick={() => onNavigate('/app')} className="flex items-center gap-2 text-[11px] text-slate-500 hover:text-white"><ArrowLeft className="h-3.5 w-3.5" /> Marketplace overview</button>
-      <section className="relative mt-6 overflow-hidden rounded-2xl border border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(167,139,250,0.12),transparent_35%),#0c0e16] p-7 sm:p-9"><div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end"><div><span className="flex h-11 w-11 items-center justify-center rounded-xl border border-violet-300/15 bg-violet-300/[0.04] text-violet-300"><BrainCircuit className="h-5 w-5" /></span><p className="mt-6 font-mono text-[9px] uppercase tracking-[0.22em] text-violet-300">Local managed inference</p><h1 className="mt-3 max-w-3xl text-3xl font-medium tracking-[-0.04em] text-slate-100 sm:text-5xl">Rent this GPU through one authenticated API</h1><p className="mt-5 max-w-3xl text-sm leading-7 text-slate-400">Create a customer key, call an OpenAI-compatible base URL, and route the request to the healthy Ollama model on this provider PC.</p></div><div className="rounded-xl border border-white/[0.08] bg-black/20 p-5"><div className="flex flex-wrap gap-2"><StatusPill good={gatewayStatus === 'ok'}>{gatewayStatus === 'ok' ? 'Gateway ready' : 'Gateway unavailable'}</StatusPill><StatusPill good={Boolean(provider)}>{provider ? 'Provider accepting' : 'Provider waiting'}</StatusPill></div><p className="mt-4 break-all font-mono text-[10px] text-slate-500">{INFERENCE_BASE_URL}</p><button type="button" onClick={refreshPublicState} className="mt-4 inline-flex items-center gap-2 text-[10px] text-slate-600 hover:text-white"><RefreshCw className="h-3.5 w-3.5" /> Refresh readiness</button></div></div></section>
+      <section className="relative mt-6 overflow-hidden rounded-2xl border border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(167,139,250,0.12),transparent_35%),#0c0e16] p-7 sm:p-9"><div className="relative grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-end"><div><span className="flex h-11 w-11 items-center justify-center rounded-xl border border-violet-300/15 bg-violet-300/[0.04] text-violet-300"><BrainCircuit className="h-5 w-5" /></span><p className="mt-6 font-mono text-[9px] uppercase tracking-[0.22em] text-violet-300">Managed inference</p><h1 className="mt-3 max-w-3xl text-3xl font-medium tracking-[-0.04em] text-slate-100 sm:text-5xl">Rent this GPU through one authenticated API</h1><p className="mt-5 max-w-3xl text-sm leading-7 text-slate-400">Create a customer key and call an OpenAI-compatible base URL. The orchestrator queues the request for an online provider, whose agent runs it on its own GPU and returns the result. Your key never leaves the orchestrator.</p></div><div className="rounded-xl border border-white/[0.08] bg-black/20 p-5"><div className="flex flex-wrap gap-2"><StatusPill good={gatewayStatus === 'ok'}>{gatewayStatus === 'ok' ? 'Gateway ready' : 'Gateway unavailable'}</StatusPill><StatusPill good={Boolean(provider)}>{provider ? 'Provider accepting' : 'Provider waiting'}</StatusPill></div><p className="mt-4 break-all font-mono text-[10px] text-slate-500">{INFERENCE_BASE_URL}</p><button type="button" onClick={refreshPublicState} className="mt-4 inline-flex items-center gap-2 text-[10px] text-slate-600 hover:text-white"><RefreshCw className="h-3.5 w-3.5" /> Refresh readiness</button></div></div></section>
       <div className="mt-6 overflow-x-auto border-b border-white/[0.06]"><div className="flex min-w-max gap-1">{TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 border-b px-4 py-3 text-[11px] ${activeTab === tab.id ? 'border-violet-300 text-slate-100' : 'border-transparent text-slate-600 hover:text-slate-300'}`}><tab.icon className="h-3.5 w-3.5" />{tab.label}</button>)}</div></div>
       <div className="mt-6">
         {activeTab === 'setup' && <SetupTab gatewayReady={gatewayStatus === 'ok'} provider={provider} apiKey={apiKey} models={models} onOpenKeys={() => setActiveTab('keys')} />}

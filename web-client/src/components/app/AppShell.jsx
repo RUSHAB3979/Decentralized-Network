@@ -33,12 +33,37 @@ const routeIsActive = (currentRoute, route) => {
   return currentRoute.startsWith(route);
 };
 
-const AppShell = ({ currentRoute, onNavigate, children }) => {
+const AppShell = ({ currentRoute, onNavigate, children, session }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const account = session?.user ?? null;
+  // Initials from the display name if there is one, otherwise the email. Falls
+  // back to a dash rather than empty so the avatar never collapses to a blank
+  // circle that looks like a loading state that never finished.
+  const initials = (() => {
+    const source = account?.display_name || account?.email || '';
+    const letters = source.trim().split(/[\s@._-]+/).filter(Boolean).slice(0, 2);
+    return letters.length ? letters.map((part) => part[0].toUpperCase()).join('') : '—';
+  })();
+
+  const signOut = async () => {
+    setSigningOut(true);
+    try {
+      await session?.logout?.();
+      // Land on the public page, not on /login. Being bounced straight to a
+      // login form after choosing to sign out reads as the sign-out having
+      // failed.
+      navigate('/');
+    }
+    finally {
+      setSigningOut(false);
+    }
+  };
   const searchRef = useRef(null);
   const searchableItems = [...NAV_ITEMS, ...ACCOUNT_ITEMS];
   const searchResults = searchableItems.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
@@ -118,7 +143,7 @@ const AppShell = ({ currentRoute, onNavigate, children }) => {
             <Activity className="h-3.5 w-3.5 text-emerald-400" />
             Frontend sandbox
           </div>
-          <p className="mt-2 text-[11px] leading-5 text-slate-600">Preview data only. No billing or workloads are connected yet.</p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-600">Model APIs run real inference on enrolled providers. Billing, render, workstations and gaming are still preview data.</p>
         </div>
       </div>
     </div>
@@ -165,9 +190,16 @@ const AppShell = ({ currentRoute, onNavigate, children }) => {
             <button type="button" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((value) => !value); setProfileOpen(false); }} className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-2.5 text-slate-500 transition-colors hover:text-white">
               <Bell className="h-4 w-4" />
             </button>
-            <button type="button" aria-label="Open preview profile menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen((value) => !value); setNotificationsOpen(false); }} className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-indigo-300 to-cyan-300 text-xs font-semibold text-[#07080d]">RP</button>
+            <button type="button" aria-label="Open account menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen((value) => !value); setNotificationsOpen(false); }} className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-indigo-300 to-cyan-300 text-xs font-semibold text-[#07080d]">{initials}</button>
             {notificationsOpen && <div className="absolute right-16 top-[60px] w-72 rounded-xl border border-white/[0.09] bg-[#0d0f17] p-4 shadow-2xl shadow-black/60"><p className="text-xs font-medium text-slate-300">Notifications</p><div className="mt-4 flex min-h-28 flex-col items-center justify-center rounded-lg border border-white/[0.06] bg-black/20 p-4 text-center"><Bell className="h-5 w-5 text-slate-800" /><p className="mt-3 text-[11px] text-slate-500">No sandbox notifications</p><p className="mt-1 text-[9px] text-slate-700">Backend events are not connected.</p></div></div>}
-            {profileOpen && <div className="absolute right-4 top-[60px] w-64 rounded-xl border border-white/[0.09] bg-[#0d0f17] p-3 shadow-2xl shadow-black/60"><div className="border-b border-white/[0.06] px-2 pb-3"><p className="text-xs font-medium text-slate-300">Rushab preview</p><p className="mt-1 text-[9px] text-slate-700">Local frontend identity · not authenticated</p></div><button type="button" onClick={() => navigate('/login')} className="mt-2 w-full rounded-lg px-3 py-2.5 text-left text-xs text-slate-500 hover:bg-white/[0.05] hover:text-white">Open authentication preview</button><button type="button" onClick={() => navigate('/')} className="w-full rounded-lg px-3 py-2.5 text-left text-xs text-slate-500 hover:bg-white/[0.05] hover:text-white">Return to landing page</button></div>}
+            {profileOpen && <div className="absolute right-4 top-[60px] w-64 rounded-xl border border-white/[0.09] bg-[#0d0f17] p-3 shadow-2xl shadow-black/60">
+              <div className="border-b border-white/[0.06] px-2 pb-3">
+                <p className="truncate text-xs font-medium text-slate-300">{account?.display_name || account?.email || 'Signed in'}</p>
+                {account?.display_name && <p className="mt-1 truncate text-[10px] text-slate-600">{account.email}</p>}
+              </div>
+              <button type="button" onClick={() => navigate('/')} className="mt-2 w-full rounded-lg px-3 py-2.5 text-left text-xs text-slate-500 hover:bg-white/[0.05] hover:text-white">Return to landing page</button>
+              <button type="button" onClick={signOut} disabled={signingOut} className="w-full rounded-lg px-3 py-2.5 text-left text-xs text-rose-300/80 hover:bg-rose-500/[0.08] hover:text-rose-200 disabled:opacity-50">{signingOut ? 'Signing out…' : 'Sign out'}</button>
+            </div>}
           </div>
         </header>
         <main className="min-h-[calc(100vh-72px)]">{children}</main>

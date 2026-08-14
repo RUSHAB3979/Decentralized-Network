@@ -89,3 +89,160 @@ CREATE TABLE IF NOT EXISTS inference_requests (
 
 CREATE INDEX IF NOT EXISTS inference_requests_key_created_idx
     ON inference_requests (api_key_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Accounts.
+--
+-- A customer owns API keys; an API key owns inference requests. Before this
+-- table existed, `marketplace_api_keys` had no owner and key administration was
+-- gated on the caller being loopback (`LOCAL_DEMO_MODE`), which is a deployment
+-- posture rather than an identity. Anyone reaching the orchestrator from the
+-- right address was every customer at once.
+--
+-- Passwords are stored as scrypt digests, never plaintext and never a bare
+-- hash. See orchestrator/auth.py for the parameters and why a plain SHA-256
+-- would be wrong here.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+    user_id         TEXT PRIMARY KEY,
+
+    -- Stored lowercased and trimmed by the application so that
+    -- `Rushab@x.com` and `rushab@x.com` cannot become two accounts. The UNIQUE
+    -- constraint is what actually enforces it under a race; the normalisation
+    -- is what makes the constraint mean what we think it means.
+    email           TEXT        NOT NULL UNIQUE,
+
+    -- Opaque `scrypt$n$r$p$salt$digest`. Self-describing so the cost
+    -- parameters can be raised later without invalidating existing rows.
+    password_hash   TEXT        NOT NULL,
+
+    display_name    TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at   TIMESTAMPTZ
+);
+
+-- ---------------------------------------------------------------------------
+-- Login sessions.
+--
+-- Opaque random tokens, stored hashed, rather than JWTs. A JWT cannot be
+-- revoked before it expires without keeping a deny-list, which is a database
+-- lookup -- the same lookup this table already is, minus the cryptography.
+--
+-- Expiry is DERIVED at read time from `expires_at`, never swept by a
+-- background job. Same reasoning as provider liveness: a sweeper that dies
+-- leaves every expired session valid forever, and nothing raises.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id      TEXT PRIMARY KEY,
+    user_id         TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+
+    -- Only the digest is stored. A leaked database backup must not be a set of
+    -- working login tokens.
+    token_hash      TEXT        NOT NULL UNIQUE,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ NOT NULL,
+    revoked_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS user_sessions_user_idx
+    ON user_sessions (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Columns added to tables that already existed.
+--
+-- `CREATE TABLE IF NOT EXISTS` cannot alter a table that is already there, so
+-- new columns need their own idempotent statements. This is the migration
+-- ceiling orchestrator/db.py names in its docstring: it is still reachable
+-- with ADD COLUMN IF NOT EXISTS, and it stops being reachable the first time a
+-- column needs a type change or a backfill. That is the point to adopt Alembic.
+-- ---------------------------------------------------------------------------
+
+-- Which customer owns this key. Nullable because keys issued by the old
+-- loopback-only demo flow have no owner and must keep working until they are
+-- revoked; every key minted from now on has one.
+ALTER TABLE marketplace_api_keys
+    ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS marketplace_api_keys_user_idx
+    ON marketplace_api_keys (user_id, created_at DESC);
+
+-- Proof that a machine claiming to be this node actually is. `node_id` is a
+-- public identifier (agent/identity.py); this is the secret half, issued once
+-- at registration and stored only as a digest.
+--
+-- SCOPE, STATED PLAINLY: this authenticates the transport, nothing more. It is
+-- not agent/core/creds.py, which is hand-built under ADR 0002 and still
+-- unwritten. In particular the agent currently keeps this token in a plaintext
+-- file under %LOCALAPPDATA%; DPAPI storage, rotation and per-machine binding
+-- are exactly what creds.py owes. Do not read this column as that work being
+-- done.
+ALTER TABLE provider_nodes
+    ADD COLUMN IF NOT EXISTS node_token_hash TEXT;
+
+-- ---------------------------------------------------------------------------
+-- The work queue.
+--
+-- Why a queue at all: a provider's agent runs on a home PC behind NAT. The
+-- orchestrator cannot open a connection to it, so work cannot be pushed. The
+-- agent asks for work over a connection it opened itself, which is the only
+-- direction that survives a consumer router.
+--
+-- Claim expiry is DERIVED, never swept. A job is claimable when it is queued,
+-- or when it was claimed and its lease has passed. There is no background task
+-- marking jobs abandoned -- if there were, its death would strand every job in
+-- `claimed` forever with nothing raising, which is the exact failure this
+-- repository keeps designing around.
+--
+-- HAND-BUILT SEAM: the lease semantics here are the minimum needed to move a
+-- request to a machine and back. Renewal, drain, partial results and crash
+-- reconciliation belong to agent/core/lease.py, which is hand-built under
+-- ADR 0002 and still raises NotImplementedError.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inference_jobs (
+    job_id            TEXT PRIMARY KEY,
+
+    -- One job per request today. Kept as separate identifiers because a
+    -- retried or re-dispatched request must be able to produce a second job
+    -- without losing the first one's evidence.
+    request_id        TEXT        NOT NULL REFERENCES inference_requests(request_id),
+
+    -- Chosen at enqueue time. Not a foreign key to provider_nodes on purpose:
+    -- a node that deregisters mid-flight must not delete the record of work it
+    -- was given.
+    node_id           TEXT        NOT NULL,
+
+    model             TEXT        NOT NULL,
+
+    -- The chat payload exactly as it will be handed to the runtime. JSONB so
+    -- it can be inspected during an incident without a second table.
+    payload           JSONB       NOT NULL,
+
+    -- queued | claimed | completed | failed
+    status            TEXT        NOT NULL DEFAULT 'queued',
+
+    claimed_at        TIMESTAMPTZ,
+    lease_expires_at  TIMESTAMPTZ,
+
+    -- Result, written once by the agent that holds the lease.
+    result_content    TEXT,
+    finish_reason     TEXT,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    total_duration_ms INTEGER,
+    error_code        TEXT,
+
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at      TIMESTAMPTZ
+);
+
+-- The claim query filters on node and status and orders by age. This index
+-- matches that access pattern; without it every claim scans the table, which
+-- is fine at ten jobs and not at ten thousand.
+CREATE INDEX IF NOT EXISTS inference_jobs_claimable_idx
+    ON inference_jobs (node_id, status, created_at);
+
+-- The waiting request polls its own job by id; that is served by the primary
+-- key. This one serves "what happened to request X" during debugging.
+CREATE INDEX IF NOT EXISTS inference_jobs_request_idx
+    ON inference_jobs (request_id);

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, LockKeyhole, Mail, User, Zap } from 'lucide-react';
 import GithubMark from './icons/GithubMark';
 import Logo from './Logo';
 import GlowCursor from './fx/GlowCursor';
+import { useSession } from '../hooks/useSession';
 import Starfield from './fx/Starfield';
 import FilmGrain from './fx/FilmGrain';
 const benefits = [
@@ -14,16 +15,51 @@ const baseUrl = import.meta.env.BASE_URL;
 const AuthPage = ({ initialMode }) => {
     const [mode, setMode] = useState(initialMode);
     const [showPassword, setShowPassword] = useState(false);
-    const [submitted, setSubmitted] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState('');
+    const { status, user, signup, login } = useSession();
     const isSignup = mode === 'signup';
+
+    // Somebody who is already signed in has no business on this page. Sending
+    // them to the app rather than rendering a login form avoids the confusing
+    // state where signing in "again" appears to do nothing.
+    useEffect(() => {
+        if (status === 'authenticated') window.location.hash = '/app/models';
+    }, [status]);
+
     const switchMode = (next) => {
         setMode(next);
-        setSubmitted(false);
+        setError('');
         window.location.hash = '/' + next;
     };
-    const submit = (event) => {
+
+    const submit = async (event) => {
         event.preventDefault();
-        setSubmitted(true);
+        // Read from the form rather than keeping a controlled input per field.
+        // Fewer moving parts, and it keeps the password out of React state --
+        // which matters because state ends up in devtools and in error reports.
+        const data = new FormData(event.currentTarget);
+        const email = String(data.get('email') ?? '');
+        const password = String(data.get('password') ?? '');
+        const displayName = String(data.get('name') ?? '');
+
+        setBusy(true);
+        setError('');
+        try {
+            if (isSignup) await signup({ email, password, displayName });
+            else await login({ email, password });
+            window.location.hash = '/app/models';
+        }
+        catch (err) {
+            // The server's own wording, not a generic replacement. It already
+            // distinguishes "that email already has an account" (409) from
+            // "invalid email or password" (401) from a 503, and rewriting those
+            // into one message would throw away the only useful part.
+            setError(err.message || 'Something went wrong. Try again.');
+        }
+        finally {
+            setBusy(false);
+        }
     };
     return (<div className="relative min-h-[100svh] overflow-hidden bg-[#03040c] text-slate-100">
       <GlowCursor />
@@ -95,8 +131,8 @@ const AuthPage = ({ initialMode }) => {
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
-                <button type="button" className="auth-social" data-mag><GithubMark className="h-4 w-4"/>GitHub</button>
-                <button type="button" className="auth-social" data-mag><span className="text-base font-semibold text-iridescent">G</span>Google</button>
+                <button type="button" disabled title="Not available yet — use email" className="auth-social cursor-not-allowed opacity-40" data-mag><GithubMark className="h-4 w-4"/>GitHub</button>
+                <button type="button" disabled title="Not available yet — use email" className="auth-social cursor-not-allowed opacity-40" data-mag><span className="text-base font-semibold text-iridescent">G</span>Google</button>
               </div>
               <div className="my-6 flex items-center gap-4">
                 <span className="h-px flex-1 bg-white/[0.07]"/>
@@ -114,7 +150,7 @@ const AuthPage = ({ initialMode }) => {
                   </span>
                   <div>
                     <LockKeyhole className="h-4 w-4"/>
-                    <input name="password" type={showPassword ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} required minLength={8} placeholder={isSignup ? 'At least 8 characters' : 'Enter your password'}/>
+                    <input name="password" type={showPassword ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} required minLength={isSignup ? 10 : 1} placeholder={isSignup ? 'At least 10 characters' : 'Enter your password'}/>
                     <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="text-slate-500 transition-colors hover:text-white">
                       {showPassword ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}
                     </button>
@@ -124,11 +160,13 @@ const AuthPage = ({ initialMode }) => {
                     <input type="checkbox" required className="mt-1 accent-indigo-400"/>
                     <span>I agree to the <a href="#terms" className="text-slate-300 hover:text-white">Terms</a> and <a href="#privacy" className="text-slate-300 hover:text-white">Privacy Policy</a>.</span>
                   </label>)}
-                <button type="submit" className="btn-liquid group mt-2 !flex w-full justify-center !py-3.5" data-mag>
-                  {isSignup ? 'Create account' : 'Enter the fabric'}
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>
+                <button type="submit" disabled={busy} className="btn-liquid group mt-2 !flex w-full justify-center !py-3.5 disabled:cursor-not-allowed disabled:opacity-60" data-mag>
+                  {busy
+                    ? (isSignup ? 'Creating account…' : 'Signing in…')
+                    : (isSignup ? 'Create account' : 'Enter the fabric')}
+                  {!busy && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>}
                 </button>
-                {submitted && <p role="status" className="rounded-xl border border-cyan-300/15 bg-cyan-300/[0.05] px-4 py-3 text-center text-xs text-cyan-200">Interface ready — connect this form to your authentication API to continue.</p>}
+                {error && (<p role="alert" className="rounded-xl border border-rose-400/25 bg-rose-500/[0.07] px-4 py-3 text-center text-xs text-rose-200">{error}</p>)}
               </form>
 
               <p className="mt-6 text-center text-xs text-slate-500">
@@ -140,8 +178,8 @@ const AuthPage = ({ initialMode }) => {
             </div>
           </div>
           <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[9px] uppercase tracking-[0.24em] text-slate-600">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.8)]"/>
-            Frontend preview · authentication not connected
+            <span className={'h-1.5 w-1.5 rounded-full ' + (status === 'error' ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,.8)]' : 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.8)]')}/>
+            {status === 'error' ? 'Orchestrator unreachable' : 'Connected to orchestrator'}
           </div>
         </section>
       </main>

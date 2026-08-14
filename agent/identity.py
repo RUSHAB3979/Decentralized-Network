@@ -126,3 +126,64 @@ def node_id() -> str:
 
 def hostname() -> str:
     return socket.gethostname()
+
+
+# ---------------------------------------------------------------------------
+# The node's transport credential.
+#
+# Kept beside node_id because they are two halves of one identity: node_id says
+# which machine this is, the token proves it. They are separate files so that
+# losing the token -- which is expected, on every re-registration -- never
+# threatens the id, which must survive reinstalls.
+#
+# HAND-BUILT SEAM, stated plainly: this writes the secret in plaintext to
+# %LOCALAPPDATA%. Anyone with local access to the provider's machine can read it
+# and impersonate the node. Doing this properly means DPAPI (CryptProtectData,
+# user scope), which ties the ciphertext to the Windows account, and that is
+# agent/core/creds.py's job -- hand-built under ADR 0002 and still raising
+# NotImplementedError. The header of this module already draws the
+# identifier-versus-proof line; this is the proof half, parked here in its
+# weakest form until the real thing lands.
+# ---------------------------------------------------------------------------
+
+_TOKEN_FILENAME = "node_token"
+
+
+def node_token() -> str | None:
+    """The current credential, or None if this node has not registered yet."""
+    try:
+        value = (state_dir() / _TOKEN_FILENAME).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def store_node_token(token: str) -> bool:
+    """Persist a freshly issued credential. Returns whether it was written.
+
+    A write failure is reported rather than raised. The agent can still
+    register, heartbeat and show a provider their machine's status without this
+    -- it simply cannot claim work, which is a degradation the caller can log
+    honestly instead of a crash on startup.
+    """
+    path = state_dir() / _TOKEN_FILENAME
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(token, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def clear_node_token() -> None:
+    """Discard a credential the orchestrator has rejected.
+
+    Called when a claim comes back 401. Removing the file makes the next
+    registration mint a fresh token, so a node whose credential was rotated
+    elsewhere heals itself instead of failing every claim until someone
+    restarts the app.
+    """
+    try:
+        (state_dir() / _TOKEN_FILENAME).unlink()
+    except OSError:
+        pass

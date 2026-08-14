@@ -26,7 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Lowercase hex/alphanumeric with dashes. The agent derives this from stable
 # machine facts (see agent/identity.py); the pattern exists so a malformed or
@@ -96,6 +96,15 @@ class RegisterResponse(BaseModel):
     # deciding. It costs nothing now and means the interval can be changed for
     # the whole fleet later without shipping a new desktop build.
     heartbeat_interval_s: int
+
+    # The node's transport credential, returned exactly once per registration
+    # and never readable again. The agent persists it and presents it when
+    # claiming work; the orchestrator keeps only a digest.
+    #
+    # Optional so that a newer agent talking to an orchestrator that predates
+    # this field does not fail to parse the response. An agent that gets None
+    # here simply cannot claim work, which is the honest degradation.
+    node_token: str | None = None
 
 
 class HeartbeatRequest(Strict):
@@ -244,3 +253,146 @@ class UsageSummary(BaseModel):
     completion_tokens: int
     total_tokens: int
     total_duration_ms: int
+
+
+# ---------------------------------------------------------------------------
+# Accounts.
+#
+# Signup and login carry a password, so these models are the last place it is
+# a plain string before orchestrator/auth.py turns it into a digest. Nothing
+# below is ever echoed back: there is no response model here with a password
+# field, which is the cheapest way to guarantee one never reaches a log or a
+# browser.
+# ---------------------------------------------------------------------------
+
+
+class _EmailNormalising(Strict):
+    """Trim and lowercase an email before anything else looks at it.
+
+    `mode="before"` matters: it runs ahead of the pattern check. Validating
+    first and normalising later means a trailing space -- which phone keyboards
+    add on their own after autocomplete -- is a 422 telling someone their own
+    email address is malformed. Normalising first also guarantees the value the
+    UNIQUE constraint sees is the same value a later login looks up, so one
+    person cannot become two accounts.
+    """
+
+    # check_fields=False because this base class declares no `email` field
+    # itself -- its subclasses do. Without it Pydantic refuses to build the
+    # class, on the reasonable grounds that a validator naming a field that does
+    # not exist is usually a typo.
+    @field_validator("email", mode="before", check_fields=False)
+    @classmethod
+    def _normalise_email(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class SignupRequest(_EmailNormalising):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+    # Minimum 10 rather than the customary 8. Length is the only property that
+    # reliably resists an offline wordlist; composition rules ("one capital,
+    # one symbol") mostly produce Password1! and a person who cannot remember
+    # it. The upper bound exists because scrypt hashes whatever it is given,
+    # and a megabyte-long password is a free way to burn server CPU.
+    password: str = Field(min_length=10, max_length=256)
+
+    display_name: str | None = Field(default=None, max_length=80)
+
+
+class LoginRequest(_EmailNormalising):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class UserView(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None
+    created_at: datetime
+
+
+class SessionCreated(BaseModel):
+    # Returned exactly once, at signup and login. The server keeps only a
+    # digest, so this value cannot be re-read afterwards -- losing it means
+    # logging in again, not recovering it.
+    token: str
+    expires_at: datetime
+    user: UserView
+
+
+# ---------------------------------------------------------------------------
+# The provider work queue.
+#
+# These are the agent's half of the contract, and they are separate from the
+# customer-facing chat models on purpose. A customer sends OpenAI-shaped
+# messages; an agent receives a job envelope. Collapsing the two would mean the
+# request format a customer controls is the format an agent executes, with no
+# seam to validate or rewrite at.
+# ---------------------------------------------------------------------------
+
+
+class JobPayload(BaseModel):
+    """What the agent is being asked to run."""
+
+    model: str
+    messages: list[ChatMessage]
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+class JobOffer(BaseModel):
+    """One claimed job, handed to exactly one agent."""
+
+    job_id: str
+    model: str
+    payload: JobPayload
+
+    # When this claim lapses and the job becomes claimable again. Sent so the
+    # agent can abandon work it can no longer deliver, rather than finishing a
+    # job whose lease expired and whose result will be rejected.
+    lease_expires_at: datetime
+
+
+class JobClaimResponse(BaseModel):
+    """Either a job, or nothing to do.
+
+    `job` is nullable rather than the endpoint returning 204, because the agent
+    long-polls: an empty result is a normal, frequent, successful outcome and
+    modelling it as a body keeps the client's parsing identical either way.
+    """
+
+    job: JobOffer | None = None
+
+    # Echoed so the agent can pace itself from the server rather than from a
+    # constant compiled into a desktop build that ships on its own schedule.
+    poll_interval_s: int
+
+
+class JobResultRequest(Strict):
+    """The agent reporting what happened. Terminal either way."""
+
+    # 'completed' or 'failed'. Not a Literal: an agent build newer than this
+    # orchestrator reporting an unrecognised terminal state should be recorded,
+    # not rejected -- rejecting it would strand the job until its lease lapsed
+    # and then run the work a second time.
+    status: str = Field(min_length=1, max_length=32)
+
+    content: str = Field(default="", max_length=1_000_000)
+    finish_reason: str = Field(default="stop", max_length=32)
+
+    # Counted by the runtime, reported as evidence. NOT a billing figure.
+    # Turning these into money is metering, which is hand-built under ADR 0002
+    # and lives in agent/core/meter.py -- currently NotImplementedError. The
+    # bounds are sanity limits on a number parsed out of another process's
+    # JSON, in the same spirit as the GPU metrics above.
+    prompt_tokens: int = Field(default=0, ge=0, le=10_000_000)
+    completion_tokens: int = Field(default=0, ge=0, le=10_000_000)
+    total_duration_ms: int | None = Field(default=None, ge=0)
+
+    error_code: str | None = Field(default=None, max_length=64)
+
+
+class JobResultAccepted(BaseModel):
+    job_id: str
+    status: str
