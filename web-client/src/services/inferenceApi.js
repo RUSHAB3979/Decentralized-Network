@@ -38,7 +38,13 @@ async function apiRequest(path, { apiKey, useSession = false, ...options } = {})
   try {
     response = await fetch(`${INFERENCE_BASE_URL}${path}`, { ...options, headers });
   } catch (cause) {
-    throw new AuthError('Cannot reach the orchestrator.', 0, { cause });
+    // Same three indistinguishable causes as authApi.js -- see the note there.
+    throw new AuthError(
+      `Cannot reach the orchestrator at ${INFERENCE_BASE_URL}. It may still be `
+      + `starting up, not deployed yet, or refusing this origin.`,
+      0,
+      { cause },
+    );
   }
 
   if (!response.ok) {

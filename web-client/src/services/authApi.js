@@ -30,8 +30,15 @@ export const AUTH_BASE_URL = `${ORCHESTRATOR_URL}/v1/auth`;
 const TOKEN_KEY = 'nodeforge.session';
 
 export class AuthError extends Error {
-  constructor(message, status) {
-    super(message);
+  // `options` is forwarded to Error so `cause` survives. Callers pass the
+  // original TypeError from fetch, and dropping it -- as this constructor did
+  // when it took only two parameters -- discards the one piece of information
+  // that says whether the request was refused, blocked, or never sent. The
+  // extra argument was silently ignored, which is the failure mode this
+  // codebase keeps chasing: no error, just missing detail at the moment it
+  // matters.
+  constructor(message, status, options) {
+    super(message, options);
     this.name = 'AuthError';
     this.status = status;
   }
@@ -78,10 +85,20 @@ async function authRequest(path, { method = 'POST', body, token } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (cause) {
-    // fetch only rejects on transport failure, so this is genuinely "the
-    // orchestrator is not there" -- distinct from any status it could return,
-    // and the one case where telling the user to check the backend is right.
-    throw new AuthError('Cannot reach the orchestrator.', 0, { cause });
+    // fetch rejects with an identical TypeError for a host that is not there
+    // and for a response the browser refused on CORS grounds -- the spec hides
+    // which, deliberately, so that a page cannot probe another origin by
+    // watching its own errors. Three very different problems arrive here
+    // indistinguishable, so the message names all three rather than asserting
+    // the one that happens to be most common.
+    throw new AuthError(
+      `Cannot reach the orchestrator at ${AUTH_BASE_URL}. It may still be `
+      + `starting up (a free-tier backend can take ~50s to wake), not deployed `
+      + `yet, or refusing this origin. Check the browser console for the `
+      + `specific reason.`,
+      0,
+      { cause },
+    );
   }
 
   if (response.status === 204) return null;
