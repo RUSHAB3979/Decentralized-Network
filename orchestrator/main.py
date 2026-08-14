@@ -1,8 +1,9 @@
 """Orchestrator HTTP surface.
 
-M1 scope: provider nodes can enrol, report in, and be listed. There is no
-scheduling, no lease, no metering and no money here yet -- those are later
-milestones, and several of them are hand-built per ADR 0002.
+Provider nodes can enrol, report in, and be listed. The local demo also exposes
+an API-key-protected inference gateway that selects one configured provider,
+forwards a chat request to its local Ollama runtime, and records usage totals.
+It is a single-machine learning milestone, not a production marketplace.
 
 On authentication, or its absence: `POST /providers/heartbeat` is
 unauthenticated in M1. tasks.md item 7 asks for that decision to be written
@@ -18,24 +19,41 @@ asset that does not exist yet.
 from __future__ import annotations
 
 import os
+import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
+import httpx
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from orchestrator import db
+from orchestrator import inference
 from orchestrator.liveness import liveness
 from orchestrator.models import (
+    ApiKeyCreated,
+    ApiKeyCreateRequest,
+    ApiKeyList,
+    ApiKeyView,
+    ChatCompletionChoice,
+    ChatCompletionMessage,
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    ChatUsage,
     HeartbeatRequest,
     HeartbeatResponse,
+    ModelList,
+    ModelView,
     NodeList,
     NodeView,
     RegisterRequest,
     RegisterResponse,
+    UsageSummary,
 )
 
 load_dotenv()
@@ -86,15 +104,19 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="orchestrator", version=VERSION, lifespan=lifespan)
 
-# The web client is served by Vite on another origin in development, and the
-# desktop build runs from file:// (origin "null"). Both need to read the node
-# list. This is permissive because M1 exposes only non-sensitive provider
-# telemetry; it must be narrowed to an allowlist before any endpoint returns
-# customer data or accepts an authenticated write.
+# The browser UI runs on a separate development origin. Keep the default list
+# local-only because the API can now create credentials and submit inference.
+def cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST"],
+    allow_origins=cors_origins(),
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -120,7 +142,7 @@ def _unavailable(exc: Exception) -> HTTPException:
     """
     return HTTPException(
         status_code=503,
-        detail=f"provider registry unavailable: {exc.__class__.__name__}: {exc}",
+        detail=f"orchestrator storage unavailable: {exc.__class__.__name__}: {exc}",
     )
 
 
@@ -328,4 +350,336 @@ def list_nodes():
         ],
         ttl_seconds=int(window.total_seconds()),
         server_time=now,
+    )
+
+
+def _local_demo_enabled() -> bool:
+    return os.getenv("LOCAL_DEMO_MODE", "false").lower() in {"1", "true", "yes"}
+
+
+def _require_local_demo(request: Request) -> None:
+    """Keep unauthenticated key administration on this development machine."""
+    host = request.client.host if request.client else ""
+    if not _local_demo_enabled() or host not in {"127.0.0.1", "::1", "testclient"}:
+        raise HTTPException(
+            status_code=403,
+            detail="API-key administration is available only in local demo mode",
+        )
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _authenticate_api_key(authorization: str | None) -> dict:
+    try:
+        secret = inference.bearer_token(authorization)
+    except ValueError as exc:
+        raise _unauthorized(str(exc)) from exc
+
+    prefix = inference.api_key_prefix(secret)
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT key_id, name, key_hash
+                    FROM marketplace_api_keys
+                    WHERE key_prefix = %s AND revoked_at IS NULL
+                    """,
+                    (prefix,),
+                )
+                row = cur.fetchone()
+                if row and secrets.compare_digest(
+                    row["key_hash"], inference.hash_api_key(secret)
+                ):
+                    cur.execute(
+                        """
+                        UPDATE marketplace_api_keys
+                        SET last_used_at = %s
+                        WHERE key_id = %s
+                        """,
+                        (_now(), row["key_id"]),
+                    )
+                    conn.commit()
+                    return row
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    raise _unauthorized("invalid or revoked API key")
+
+
+def _select_demo_provider(model: str | None = None) -> dict:
+    """Select the one provider allowed by the local single-node demo."""
+    node_id = (os.getenv("DEMO_PROVIDER_NODE_ID") or "").strip()
+    if not node_id:
+        raise HTTPException(
+            status_code=503,
+            detail="DEMO_PROVIDER_NODE_ID is not configured",
+        )
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT node_id, hostname, accepts_work, ollama_reachable,
+                           local_models, registered_at, last_heartbeat_at
+                    FROM provider_nodes
+                    WHERE node_id = %s
+                    """,
+                    (node_id,),
+                )
+                row = cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+    if not row:
+        raise HTTPException(status_code=503, detail="demo provider is not enrolled")
+    if liveness(row["last_heartbeat_at"], _now(), ttl()) != "online":
+        raise HTTPException(status_code=503, detail="demo provider heartbeat is stale")
+    if not row["accepts_work"]:
+        raise HTTPException(status_code=503, detail="demo provider is not accepting work")
+    if not row["ollama_reachable"]:
+        raise HTTPException(status_code=503, detail="demo provider runtime is unavailable")
+    if model and model not in (row["local_models"] or []):
+        raise HTTPException(
+            status_code=404,
+            detail=f"model {model!r} is not installed on the demo provider",
+        )
+    return row
+
+
+@app.post("/v1/api-keys", response_model=ApiKeyCreated, status_code=201)
+def create_api_key(req: ApiKeyCreateRequest, request: Request):
+    _require_local_demo(request)
+    issued = inference.issue_api_key()
+    key_id = f"key_{uuid4().hex}"
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO marketplace_api_keys (
+                        key_id, name, key_prefix, key_hash
+                    ) VALUES (%s, %s, %s, %s)
+                    RETURNING created_at
+                    """,
+                    (key_id, req.name, issued.prefix, issued.digest),
+                )
+                row = cur.fetchone()
+            conn.commit()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return ApiKeyCreated(
+        id=key_id,
+        name=req.name,
+        key=issued.secret,
+        key_prefix=issued.prefix,
+        created_at=row["created_at"],
+    )
+
+
+@app.get("/v1/api-keys", response_model=ApiKeyList)
+def list_api_keys(request: Request):
+    _require_local_demo(request)
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT key_id, name, key_prefix, created_at, last_used_at
+                    FROM marketplace_api_keys
+                    WHERE revoked_at IS NULL
+                    ORDER BY created_at DESC
+                    """
+                )
+                rows = cur.fetchall()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return ApiKeyList(
+        keys=[
+            ApiKeyView(
+                id=row["key_id"],
+                name=row["name"],
+                key_prefix=row["key_prefix"],
+                created_at=row["created_at"],
+                last_used_at=row["last_used_at"],
+            )
+            for row in rows
+        ]
+    )
+
+
+@app.delete("/v1/api-keys/{key_id}", status_code=204)
+def revoke_api_key(key_id: str, request: Request):
+    _require_local_demo(request)
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE marketplace_api_keys
+                    SET revoked_at = %s
+                    WHERE key_id = %s AND revoked_at IS NULL
+                    """,
+                    (_now(), key_id),
+                )
+                found = cur.rowcount
+            conn.commit()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    if not found:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/v1/models", response_model=ModelList)
+def list_inference_models(authorization: str | None = Header(default=None)):
+    _authenticate_api_key(authorization)
+    provider = _select_demo_provider()
+    created = int(provider["registered_at"].timestamp())
+    return ModelList(
+        data=[ModelView(id=model, created=created) for model in provider["local_models"]]
+    )
+
+
+def _finish_inference_request(
+    request_id: str,
+    *,
+    status_value: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_duration_ms: int | None = None,
+    error_code: str | None = None,
+) -> None:
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE inference_requests SET
+                        status = %s,
+                        prompt_tokens = %s,
+                        completion_tokens = %s,
+                        total_duration_ms = %s,
+                        error_code = %s,
+                        completed_at = %s
+                    WHERE request_id = %s
+                    """,
+                    (
+                        status_value,
+                        prompt_tokens,
+                        completion_tokens,
+                        total_duration_ms,
+                        error_code,
+                        _now(),
+                        request_id,
+                    ),
+                )
+            conn.commit()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+
+@app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
+def chat_completions(
+    req: ChatCompletionRequest,
+    authorization: str | None = Header(default=None),
+):
+    if req.stream:
+        raise HTTPException(status_code=400, detail="streaming is not supported yet")
+    api_key = _authenticate_api_key(authorization)
+    provider = _select_demo_provider(req.model)
+    request_id = f"chatcmpl-{uuid4().hex}"
+    created = int(time.time())
+
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO inference_requests (
+                        request_id, api_key_id, node_id, model, status
+                    ) VALUES (%s, %s, %s, %s, 'running')
+                    """,
+                    (request_id, api_key["key_id"], provider["node_id"], req.model),
+                )
+            conn.commit()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+    try:
+        result = inference.run_chat(
+            model=req.model,
+            messages=[message.model_dump() for message in req.messages],
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+        )
+    except (httpx.HTTPError, ValueError, OSError) as exc:
+        _finish_inference_request(
+            request_id,
+            status_value="failed",
+            error_code=exc.__class__.__name__,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"provider runtime failed: {exc.__class__.__name__}",
+        ) from exc
+
+    _finish_inference_request(
+        request_id,
+        status_value="completed",
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        total_duration_ms=result.total_duration_ms,
+    )
+    return ChatCompletionResponse(
+        id=request_id,
+        created=created,
+        model=req.model,
+        choices=[
+            ChatCompletionChoice(
+                message=ChatCompletionMessage(content=result.content),
+                finish_reason=result.finish_reason,
+            )
+        ],
+        usage=ChatUsage(
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            total_tokens=result.prompt_tokens + result.completion_tokens,
+        ),
+    )
+
+
+@app.get("/v1/usage", response_model=UsageSummary)
+def inference_usage(authorization: str | None = Header(default=None)):
+    api_key = _authenticate_api_key(authorization)
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS requests,
+                           COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                           COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                           COALESCE(SUM(total_duration_ms), 0) AS total_duration_ms
+                    FROM inference_requests
+                    WHERE api_key_id = %s AND status = 'completed'
+                    """,
+                    (api_key["key_id"],),
+                )
+                row = cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    prompt_tokens = int(row["prompt_tokens"])
+    completion_tokens = int(row["completion_tokens"])
+    return UsageSummary(
+        requests=int(row["requests"]),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+        total_duration_ms=int(row["total_duration_ms"]),
     )

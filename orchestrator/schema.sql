@@ -57,3 +57,35 @@ CREATE TABLE IF NOT EXISTS provider_nodes (
 -- ordered by recency of contact.
 CREATE INDEX IF NOT EXISTS provider_nodes_heartbeat_idx
     ON provider_nodes (last_heartbeat_at DESC NULLS LAST);
+
+-- Customer credentials for the local managed-inference vertical slice. The
+-- plaintext key is returned once by POST /v1/api-keys and is never stored.
+CREATE TABLE IF NOT EXISTS marketplace_api_keys (
+    key_id          TEXT PRIMARY KEY,
+    name            TEXT        NOT NULL,
+    key_prefix      TEXT        NOT NULL UNIQUE,
+    key_hash        TEXT        NOT NULL UNIQUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at    TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ
+);
+
+-- An audit and usage record, deliberately without prompt or response content.
+-- The local demo has no billing, but it still records enough evidence to show
+-- which key and provider handled a request and what Ollama counted.
+CREATE TABLE IF NOT EXISTS inference_requests (
+    request_id         TEXT PRIMARY KEY,
+    api_key_id         TEXT        NOT NULL REFERENCES marketplace_api_keys(key_id),
+    node_id            TEXT        NOT NULL REFERENCES provider_nodes(node_id),
+    model              TEXT        NOT NULL,
+    status             TEXT        NOT NULL,
+    prompt_tokens      INTEGER     NOT NULL DEFAULT 0,
+    completion_tokens  INTEGER     NOT NULL DEFAULT 0,
+    total_duration_ms  INTEGER,
+    error_code         TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at       TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS inference_requests_key_created_idx
+    ON inference_requests (api_key_id, created_at DESC);

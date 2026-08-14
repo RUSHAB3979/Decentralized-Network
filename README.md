@@ -22,10 +22,11 @@ one of them is live — check this table before you run anything.
 | `services/` | TypeScript | **frozen** — read-only contract reference, do not run |
 | `packages/contracts/` | TypeScript | **frozen** — Zod schemas the Python side must match |
 
-Current milestone is **M0**: Postgres up → orchestrator `GET /health` reports
-real database state → agent reaches the orchestrator and exits with a
-meaningful code. No auth, no tables, no matching, no payments yet. See
-[docs/Tasks/tasks.md](docs/Tasks/tasks.md).
+Current working milestone is a **local rented-inference vertical slice**:
+Postgres stores provider heartbeats, the orchestrator issues customer API
+keys, and an authenticated chat request is routed to one configured provider's
+local Ollama model. This proves the flow on one machine; it is not yet a secure,
+internet-facing marketplace. See [docs/Tasks/tasks.md](docs/Tasks/tasks.md).
 
 ---
 
@@ -244,7 +245,35 @@ invented hardware.
 - Kill the orchestrator while the agent runs. The agent must keep retrying with
   backoff and reconnect on its own; it should never need restarting.
 
-### 7. Run the tests
+### 7. Run the local rented-inference demo
+
+Keep `LOCAL_DEMO_MODE=false` outside local development. For the single-machine
+demo, set these values in `.env`:
+
+```dotenv
+LOCAL_DEMO_MODE=true
+DEMO_PROVIDER_NODE_ID=your-stable-provider-node-id
+LOCAL_OLLAMA_URL=http://127.0.0.1:11434
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+```
+
+Print this machine's stable provider id with:
+
+```powershell
+.\agent\env\Scripts\python.exe -c "from agent.identity import node_id; print(node_id())"
+```
+
+Start Postgres, the orchestrator, the provider agent, and the web client. Open
+`http://localhost:3000/Decentralized-Network/#/app/models`, create an API key,
+select a local model, and send a prompt from the Playground. The customer uses
+base URL `http://localhost:8080/v1`; the provider receives only the request,
+never the reusable customer key.
+
+The demo intentionally lacks provider authentication, TLS, sandboxing,
+payments, rate limits, multi-provider scheduling, and failover. Do not expose
+it to the public internet.
+
+### 8. Run the tests
 
 ```powershell
 .\orchestrator\env\Scripts\python.exe -m pytest orchestrator/tests agent/tests -q

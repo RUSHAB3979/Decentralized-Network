@@ -39,7 +39,6 @@ def test_path_lookup_wins_when_the_tool_is_on_path(monkeypatch):
     monkeypatch.setattr(
         telemetry.shutil, "which", lambda _: r"C:\Windows\System32\nvidia-smi.exe"
     )
-    # If PATH resolution worked, the fallbacks must not even be consulted.
     monkeypatch.setattr(
         telemetry.os.path,
         "isfile",
@@ -49,17 +48,23 @@ def test_path_lookup_wins_when_the_tool_is_on_path(monkeypatch):
     assert telemetry._nvidia_smi() == r"C:\Windows\System32\nvidia-smi.exe"
 
 
-def test_falls_back_to_the_nvsmi_folder_when_not_on_path(monkeypatch):
-    """The 3050 incident: driver present, tool installed, PATH does not list it.
+def test_falls_back_to_system32_when_path_is_reduced(monkeypatch):
+    monkeypatch.setenv("SystemRoot", r"D:\Windows")
+    monkeypatch.setattr(telemetry.shutil, "which", lambda _: None)
 
-    Older driver packages install nvidia-smi only under Program Files, which is
-    not on PATH. Before this fallback existed the machine reported no GPU.
-    """
+    expected = os.path.join(r"D:\Windows", "System32", "nvidia-smi.exe")
+    monkeypatch.setattr(telemetry.os.path, "isfile", lambda path: path == expected)
+
+    assert telemetry._nvidia_smi() == expected
+
+
+def test_falls_back_to_the_nvsmi_folder_when_not_on_path(monkeypatch):
+    """Older driver packages install nvidia-smi under Program Files."""
     monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
     monkeypatch.setattr(telemetry.shutil, "which", lambda _: None)
 
     expected = os.path.join(r"C:\Program Files", NVSMI_SUBPATH)
-    monkeypatch.setattr(telemetry.os.path, "isfile", lambda p: p == expected)
+    monkeypatch.setattr(telemetry.os.path, "isfile", lambda path: path == expected)
 
     assert telemetry._nvidia_smi() == expected
 
@@ -70,7 +75,7 @@ def test_install_paths_come_from_the_environment_not_a_hardcoded_drive(monkeypat
     monkeypatch.setattr(telemetry.shutil, "which", lambda _: None)
 
     expected = os.path.join(r"D:\Programs", NVSMI_SUBPATH)
-    monkeypatch.setattr(telemetry.os.path, "isfile", lambda p: p == expected)
+    monkeypatch.setattr(telemetry.os.path, "isfile", lambda path: path == expected)
 
     assert telemetry._nvidia_smi() == expected
 
@@ -85,12 +90,7 @@ def test_detect_gpu_is_none_when_the_tool_cannot_be_found(no_nvidia_smi_anywhere
 
 
 def test_detect_gpu_invokes_the_resolved_path_not_the_bare_name(monkeypatch):
-    """The regression guard for the whole fix.
-
-    Resolving the absolute path is pointless if the command is then invoked as
-    the bare string "nvidia-smi", because that re-runs the PATH lookup that
-    just failed. This asserts the resolved path is what actually gets executed.
-    """
+    """The resolved absolute path must be the command that actually runs."""
     resolved = os.path.join(r"C:\Program Files", NVSMI_SUBPATH)
     monkeypatch.setattr(telemetry, "_nvidia_smi", lambda: resolved)
 
@@ -116,11 +116,7 @@ def test_detect_gpu_invokes_the_resolved_path_not_the_bare_name(monkeypatch):
 
 
 def test_absent_fields_degrade_to_none_rather_than_failing(monkeypatch):
-    """nvidia-smi prints '[N/A]' for values a card does not report.
-
-    Common for temperature on laptop GPUs - which is precisely the hardware
-    this incident involved - so it must not take the whole snapshot down.
-    """
+    """nvidia-smi prints '[N/A]' for values a card does not report."""
     monkeypatch.setattr(telemetry, "_nvidia_smi", lambda: "nvidia-smi")
 
     class Completed:
