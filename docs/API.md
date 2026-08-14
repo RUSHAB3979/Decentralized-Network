@@ -2,6 +2,59 @@
 
 Base URL (local): `http://localhost:8080`
 
+## Local Rented-Inference Demo
+
+Customer-facing base URL: `http://localhost:8080/v1`
+
+This local-only vertical slice uses a Bearer API key at the orchestrator. The
+orchestrator verifies the key, chooses the provider configured by
+`DEMO_PROVIDER_NODE_ID`, forwards the request to local Ollama, and stores only
+usage metadata. It does not store prompts or responses and never sends the
+reusable customer key to the provider.
+
+### `POST /v1/api-keys`
+
+Creates a local demo customer key. This endpoint works only when
+`LOCAL_DEMO_MODE=true` and the caller is on loopback. The plaintext key is
+returned once; the database stores only its SHA-256 hash.
+
+### `GET /v1/api-keys`
+
+Lists key metadata without exposing plaintext keys.
+
+### `DELETE /v1/api-keys/{key_id}`
+
+Revokes a key. This is also restricted to local demo administration.
+
+### `GET /v1/models`
+
+Requires `Authorization: Bearer <api-key>` and lists models available on the
+configured online provider.
+
+### `POST /v1/chat/completions`
+
+Accepts an OpenAI-style non-streaming chat body and returns one assistant
+choice plus token usage. The requested model must be in the provider's
+reported `local_models` list.
+
+```json
+{
+  "model": "tinyllama:latest",
+  "messages": [
+    {"role": "user", "content": "Say hello in one sentence."}
+  ]
+}
+```
+
+### `GET /v1/usage`
+
+Requires the same Bearer key and returns aggregate request, token, and duration
+totals for that key.
+
+This is not production-ready. Provider credentials, TLS, workload isolation,
+rate limiting, billing, multi-provider scheduling, and failover are still
+required before internet deployment.
+
 The current TypeScript baseline validates JSON payloads with shared Zod schemas from `packages/contracts`. The planned Python/FastAPI implementation must preserve this documented behavior using Pydantic before cutover; see [PYTHON-FASTAPI-BACKEND-MIGRATION.md](PYTHON-FASTAPI-BACKEND-MIGRATION.md).
 
 ## Health

@@ -10,7 +10,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from orchestrator.models import Capability, HeartbeatRequest, Metrics, RegisterRequest
+from orchestrator.models import (
+    Capability,
+    ChatCompletionRequest,
+    HeartbeatRequest,
+    Metrics,
+    RegisterRequest,
+)
 
 NODE_ID = "a1b2c3d4e5f6a7b8"
 
@@ -104,3 +110,22 @@ def test_unrecognised_status_string_is_accepted():
     # heartbeating, not be taken offline by a deploy ordering accident.
     hb = HeartbeatRequest(node_id=NODE_ID, status="reprovisioning")
     assert hb.status == "reprovisioning"
+
+
+def test_chat_contract_accepts_an_openai_style_request():
+    request = ChatCompletionRequest(
+        model="tinyllama:latest",
+        messages=[{"role": "user", "content": "Hello"}],
+        max_tokens=64,
+    )
+    assert request.messages[0].role == "user"
+    assert request.stream is False
+
+
+def test_chat_contract_rejects_unbounded_output():
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="tinyllama:latest",
+            messages=[{"role": "user", "content": "Hello"}],
+            max_tokens=1_000_000,
+        )

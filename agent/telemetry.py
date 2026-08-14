@@ -21,6 +21,7 @@ import socket
 import subprocess
 import shutil
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import httpx
 
@@ -133,14 +134,35 @@ def detect_host() -> Host:
     )
 
 
+def _find_nvidia_smi() -> Path | None:
+    """Find NVIDIA's utility even when a launcher supplies a reduced PATH."""
+    on_path = shutil.which("nvidia-smi")
+    if on_path:
+        return Path(on_path)
+
+    # Windows normally installs this in System32. GUI launchers, packaged apps,
+    # and restricted shells can omit System32 from PATH even though the file
+    # and driver are healthy, which previously produced a false "no GPU".
+    windows_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    candidates = [Path(windows_root) / "System32" / "nvidia-smi.exe"]
+    candidates.append(
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "NVIDIA Corporation"
+        / "NVSMI"
+        / "nvidia-smi.exe"
+    )
+    return next((candidate for candidate in candidates if candidate.is_file()), None)
+
+
 def detect_gpu() -> Gpu | None:
     """Live GPU state from nvidia-smi. None means no NVIDIA GPU, not a failure."""
-    if shutil.which("nvidia-smi") is None:
+    binary = _find_nvidia_smi()
+    if binary is None:
         return None
     try:
         out = winproc.run(
             [
-                "nvidia-smi",
+                str(binary),
                 "--query-gpu=name,memory.total,memory.used,utilization.gpu,"
                 "temperature.gpu,driver_version",
                 "--format=csv,noheader,nounits",

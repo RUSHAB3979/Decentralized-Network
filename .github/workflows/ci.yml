@@ -229,7 +229,7 @@ jobs:
           cache-dependency-path: orchestrator/requirements.txt
 
       - name: Install dev tooling
-        run: pip install ruff==0.16.2 pytest==9.1.1 httpx==0.28.1
+        run: pip install ruff==0.16.2 pytest==9.1.1 httpx==0.28.1 httpx2==2.0.0
 
       # Resolving requirements.txt in CI is itself the check: it proves the
       # pins install cleanly on a machine that is not the author's laptop.

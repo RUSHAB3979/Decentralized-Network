@@ -24,6 +24,7 @@ precisely because Pydantic turns that class of silent corruption into a loud
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -160,3 +161,86 @@ class NodeList(BaseModel):
     # a number that only exists in the orchestrator's environment.
     ttl_seconds: int
     server_time: datetime
+
+
+class ApiKeyCreateRequest(Strict):
+    name: str = Field(default="Local demo key", min_length=1, max_length=80)
+
+
+class ApiKeyCreated(BaseModel):
+    id: str
+    name: str
+    key: str
+    key_prefix: str
+    created_at: datetime
+
+
+class ApiKeyView(BaseModel):
+    id: str
+    name: str
+    key_prefix: str
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class ApiKeyList(BaseModel):
+    keys: list[ApiKeyView]
+
+
+class ChatMessage(Strict):
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(min_length=1, max_length=32_000)
+
+
+class ChatCompletionRequest(Strict):
+    model: str = Field(min_length=1, max_length=255)
+    messages: list[ChatMessage] = Field(min_length=1, max_length=100)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1, le=4096)
+    stream: bool = False
+
+
+class ChatCompletionMessage(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str
+
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatCompletionMessage
+    finish_reason: str
+
+
+class ChatUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: Literal["chat.completion"] = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: ChatUsage
+
+
+class ModelView(BaseModel):
+    id: str
+    object: Literal["model"] = "model"
+    created: int
+    owned_by: str = "nodeforge-provider"
+
+
+class ModelList(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[ModelView]
+
+
+class UsageSummary(BaseModel):
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    total_duration_ms: int

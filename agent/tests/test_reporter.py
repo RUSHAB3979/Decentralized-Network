@@ -194,6 +194,7 @@ def test_loop_survives_an_unreachable_orchestrator(monkeypatch):
     # loop alive and waiting to retry, not kill the thread.
     stop = threading.Event()
     attempts = []
+    monkeypatch.setattr(reporter, "snapshot", lambda _state: telemetry())
 
     def handler(request: httpx.Request) -> httpx.Response:
         attempts.append(request.url)
