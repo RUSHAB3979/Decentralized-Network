@@ -23,6 +23,13 @@
 # TO DEPLOY: Render dashboard -> New -> Blueprint -> pick this repository.
 # Render reads this file, creates both resources, and wires DATABASE_URL from
 # the database into the service automatically.
+#
+# The service name below must match the deployed service, because the name is
+# what determines the public hostname (<name>.onrender.com) that the frontend
+# bundles are built to call. It is `decentralized-network` because that is what
+# the first deployment was actually created as; renaming it here would point the
+# blueprint at a service that does not exist and create a second one next to the
+# working one.
 
 databases:
   - name: nodeforge-db
@@ -36,7 +43,7 @@ databases:
 
 services:
   - type: web
-    name: nodeforge-orchestrator
+    name: decentralized-network
     runtime: python
     plan: free
     region: oregon
