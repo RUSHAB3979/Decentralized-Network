@@ -11,8 +11,17 @@ Status values: `pending` · `in_progress` · `blocked` · `done`
 
 ## Current priority
 
-**Y1 — verify M0 from a clean clone.** M0 code is complete as of 2026-08-10 and
-cannot be signed off until this passes. Four people are waiting behind it.
+**Y6 — the provider account, console, and agent enrolment.** Assigned 2026-08-16;
+see [ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md) for the
+decisions it implements. This is now the main body of your work.
+
+**Y0 still gates it.** Nobody writes a feature until their first PR is merged, and
+yours is not. Do Y0 first — it is one line in `CONTRIBUTORS.md` and it exists to
+prove clone → branch → CI → merge works for you before something important
+depends on it.
+
+Y1–Y5 below are unchanged and still open. Y1 in particular was never done, and M0
+was signed off without it; that is recorded honestly rather than quietly closed.
 
 ---
 
@@ -200,7 +209,240 @@ Standing responsibilities:
 
 ---
 
+# Provider accounts, console, and agent enrolment (Y6–Y11)
 
+Assigned 2026-08-16. The decisions these tasks implement are recorded in
+[ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md) — read it first,
+because it explains *why* each of the choices below was made and what the cost of
+each one is. This section is the work; the ADR is the reasoning.
+
+## What you are building, in one paragraph
+
+A provider signs up and logs in at a login page of their own, separate from the
+customer one. They land in a provider console. There they generate an **enrolment
+key**, paste it into the GPUProvider desktop app, and from that moment the machine
+belongs to their account — their nodes, their telemetry, their job history, and
+eventually their earnings all appear in the console under their name.
+
+## Why this is worth doing properly
+
+Right now `POST /providers/register` accepts any caller and hands back a working
+credential (`orchestrator/main.py:180`, token returned at `:247`). Anyone who can
+reach the orchestrator and guess a `node_id` is issued a token for it. That is
+"trust on first registration", and `agent/core/creds.py` looked at that exact
+design and rejected it: *"a node_id is derivable from a machine the attacker does
+not have to own, and the first caller wins. Only acceptable if registration is
+itself gated."*
+
+We shipped it anyway, and then put the orchestrator on the public internet, which
+[ADR 0004](adr/0004-m1-unauthenticated-heartbeat.md) explicitly said must not
+happen while it stood. **Y8 is what closes that.** The console is the visible half
+of this work; the gate is the point of it.
+
+## Seven rules for all of Y6–Y11
+
+These are not style preferences. Each one is a failure that produces no error
+message, which is the only kind this repository is really afraid of.
+
+1. **Reuse `orchestrator/auth.py`. Do not write a second password hasher.**
+   It already has `hash_password`, `verify_password`, `normalise_email`,
+   `issue_session_token`, `hash_token`, `session_expiry` and `session_is_valid`,
+   and its docstring explains why passwords use scrypt while machine tokens use
+   SHA-256. A separate account *table* is what was decided. A separate hasher was
+   not, and it is the single most likely way this work goes wrong.
+2. **Derive expiry; never sweep it.** Key TTL, session validity and node liveness
+   are all computed at read time from the row's own columns. The reason is in
+   `orchestrator/liveness.py` and repeated in `auth.py`: a background sweeper that
+   dies leaves every expired thing valid forever, and nothing raises.
+3. **Store digests, never secrets.** Enrolment keys and node tokens are returned
+   in plaintext exactly once and stored hashed. A leaked database backup must not
+   be a set of working credentials.
+4. **Bind the credential to the node it claims to be.** If a token is verified but
+   never checked against the `node_id` in the request body, any enrolled node can
+   act as any other and the check has bought nothing. (`creds.py`, question 2.)
+5. **A database restore must not brick the fleet.** A machine holding a valid
+   credential but with no row in the registry has to be able to re-register. That
+   self-heals today through the 404 path in `agent/reporter.py`. If gating
+   registration closes it, one restore-from-backup silently disables every
+   provider at once, and they will not all reinstall. (`creds.py`, question 3.)
+6. **Never fall back to unauthenticated.** If the credential cannot be read, the
+   node goes to ERROR and says so. Retrying without it is a downgrade attack
+   wearing the costume of a convenience. (`creds.py`, question 4.)
+7. **Every network call gets an explicit timeout.** No exceptions; see
+   `CLAUDE.md`.
+
+---
+
+## Y6 — Design the provider account and enrolment schema · `pending`
+
+**DDL in a document. No migration, no table, nothing applied.**
+
+That instruction is deliberately identical to Y3's, because Y3 is what happened
+when it was ignored. The provider node schema was never designed in a document —
+it went straight into `orchestrator/schema.sql` in PR #38, was edited twice more
+in #42 and #43, and now runs on the production database with no design record and
+no migration path. Schema design and schema application are different activities
+and the second one is much harder to undo.
+
+Deliver `docs/schema/provider-accounts.md`:
+
+- [ ] `provider_accounts` — columns, types, nullability, indexes
+- [ ] `provider_sessions` — same, and say which column expiry is derived from
+- [ ] `provider_enrolment_keys` — same, plus the lifecycle: TTL, single-use or
+      reusable, how revocation works, and what is stored (digest only)
+- [ ] `provider_nodes.provider_account_id` — **nullable**, mirroring how
+      `marketplace_api_keys.user_id` was added when accounts arrived
+- [ ] **What happens to the nodes already in the table.** They have no owner and
+      they are live. Say how one gets claimed, or say explicitly that it cannot
+      and they must re-enrol.
+- [ ] **What happens when the same machine enrols twice.** Reinstalling Windows
+      regenerates MachineGuid and therefore the `node_id`; restoring a disk image
+      does not. Both happen. (`creds.py`, question 1.)
+- [ ] Open questions listed explicitly rather than quietly decided
+
+Read `orchestrator/schema.sql` first, particularly the comment block at line 151
+about the migration ceiling. Your three new tables are reachable with
+`CREATE TABLE IF NOT EXISTS`; note in the doc whether you think that is still true
+after this change.
+
+---
+
+## Y7 — Provider auth backend · `pending`
+
+The tables from Y6, plus `/v1/provider/auth/signup`, `/login`, `/logout`, `/me`,
+and a `_authenticate_provider_session` helper.
+
+`orchestrator/main.py:707` is the customer version of that helper. Read it
+completely before writing yours — including the comment explaining why "no such
+token", "expired" and "revoked" all return the same message. That is not
+laziness; distinguishing them tells an attacker holding a stale token that it was
+once real.
+
+- [ ] Tables applied idempotently, matching the Y6 document
+- [ ] Signup, login, logout, me — all four, with session tokens stored hashed
+- [ ] **Zero new cryptography.** Every hash and token in this task comes from
+      `orchestrator/auth.py` unchanged. If you find yourself importing `hashlib`,
+      stop and re-read rule 1.
+- [ ] A provider session token is rejected by the customer endpoints, and vice
+      versa. Test this — two separate systems that happen to accept each other's
+      tokens are one system with extra steps.
+- [ ] Tests for both the success and the failure path of each endpoint
+
+---
+
+## Y8 — Enrolment keys, and gating registration · `pending`
+
+**This is the task that retires ADR 0004.** Everything else in this section is
+surface; this is the part that changes what an attacker can do.
+
+- [ ] `POST /v1/provider/enrolment-keys` — mint. Plaintext returned **exactly
+      once**; only the digest is stored. `create_api_key` (`main.py:425`) is the
+      pattern to follow.
+- [ ] `GET /v1/provider/enrolment-keys` — list by prefix and creation time. Never
+      returns a usable key.
+- [ ] `DELETE /v1/provider/enrolment-keys/{id}` — revoke
+- [ ] `POST /providers/enrol` — the agent presents an enrolment key and receives a
+      node credential; the node row is bound to the account that minted the key
+- [ ] `/providers/register` no longer mints a credential for an unenrolled node
+- [ ] **Rule 5 verified, not assumed.** Write the test where a node holds a valid
+      credential and its row has been deleted, and prove it recovers.
+- [ ] **Rule 4 verified.** Write the test where a credential issued for node A is
+      presented alongside a body claiming node B, and prove it is rejected.
+- [ ] ADR 0004 marked superseded, with the PR number that did it
+
+Rate limiting on the provider endpoints is **not** part of this task, and is still
+missing. ADR 0004 called it "the obvious next mitigation". Raise it as its own
+issue rather than folding it in here.
+
+---
+
+## Y9 — Provider login and console · `pending`
+
+`web-client/src/components/app/ProviderConsolePage.jsx` already exists and is
+worth reading before you replace anything — it renders live node telemetry today
+via `hooks/useProviderNodes.js` and `components/NodeTelemetry.jsx`, and both of
+those should be reused rather than rewritten.
+
+What it does not have is an account. It sits behind the *customer* login, so
+today every customer sees every provider's hardware.
+
+`GET /providers/nodes` now requires a session (PR #45, 2026-08-16) — it used to
+be served to anyone at all. `fetchProviderNodes` takes the token as a parameter
+rather than reading it itself, because `authApi.js` imports `ORCHESTRATOR_URL`
+from `api.js` at module scope and importing back would be a cycle that throws at
+page load. Keep that shape when you build the provider version: **if you rebuild
+this page and drop the `Authorization` header, every panel goes blank with a 401
+and it will look like your new code is broken rather than unauthenticated.**
+
+- [ ] Routes `/provider/login`, `/provider/signup`, `/provider` in
+      `web-client/src/App.jsx`
+- [ ] `services/providerAuthApi.js` and `hooks/useProviderSession.js`, mirroring
+      `services/authApi.js` and `hooks/useSession.js`
+- [ ] **A different `localStorage` key** from `nodeforge.session`. Reusing it
+      means signing into one console silently signs you into the other, which is
+      the entire separation gone with no error to notice.
+- [ ] The three-state session machine — `loading` / `anonymous` / `error` — copied
+      in behaviour, not just in shape. `useSession.js` explains at length why a
+      failed request must not be treated as signed-out.
+- [ ] Console scoped to the signed-in account: its nodes only
+- [ ] Tabs: Overview, Nodes, **Enrolment** (new), **Jobs** (new), Earnings
+- [ ] Enrolment tab generates a key, shows it once, and says plainly that it will
+      not be shown again
+- [ ] `npm run build` clean, and the flow exercised in a real browser
+
+---
+
+## Y10 — The desktop app: paste the key · `pending` · **partly blocked**
+
+A screen in the GPUProvider app that accepts an enrolment key, calls
+`POST /providers/enrol`, and stores what comes back.
+
+**You own everything except the storing.** `agent/core/creds.py` — DPAPI storage,
+rotation, cache invalidation, refusing to downgrade — is hand-built under
+[ADR 0002](adr/0002-generated-vs-handbuilt.md) and is Rushab's to write. The seam
+is a function call: you call `creds.store()`, you do not implement it.
+
+- [ ] An "not enrolled yet" state in `agent/state.py`, surfaced in the window the
+      same way `Link` is
+- [ ] A screen that accepts a key, with distinct messages for rejected, expired,
+      already-used, and orchestrator-unreachable
+- [ ] The key is never written to a log line, a traceback, or the dashboard
+- [ ] Enrolment survives a restart
+- [ ] Calls `creds.store()`; does not implement it
+
+While `creds.py` is unwritten you may develop against
+`identity.store_node_token()`. Be clear-eyed about what that is: it writes the
+secret in plaintext to `%LOCALAPPDATA%`, its own comment says so, and it is a
+known gap being tolerated — not a pattern to copy or extend.
+
+---
+
+## Y11 — Earnings, labelled honestly · `pending`
+
+The console gets an earnings and payout surface. **There is no metering.**
+`agent/core/meter.py` raises `NotImplementedError` on all three of its functions.
+Every number on this tab is invented, and will stay invented until metering is
+written — which is hand-built and not yours.
+
+So the requirement of this task is not the numbers. It is that a person reading
+the screen can tell, without being told, which figures are measured and which are
+placeholders.
+
+The page already does this well and you should keep the mechanism: per-card `Live`
+and `Preview` badges, and a header that says outright that *"provider identity,
+offers, usage, earnings, and payouts are not yet implemented and nothing shown for
+them is real."*
+
+- [ ] Earnings, payout account, and line-item evidence surfaces exist
+- [ ] Every unbacked figure carries a visible marker
+- [ ] No screenshot of this page could be mistaken for real revenue
+- [ ] The tab links to what would have to exist for it to become real
+
+This is the one that matters when someone puts a screenshot in a pitch deck. A
+dashboard that mixes measured and invented numbers without marking which is which
+is how a placeholder becomes a figure somebody repeats as a fact.
+
+---
 
 ## Notes
 
@@ -209,3 +451,4 @@ Add a dated line when something changes.
 | Date | Note |
 |------|------|
 | 2026-08-10 | File created. M0 code complete; Y1 is the blocking item. |
+| 2026-08-16 | Y6–Y11 assigned: provider accounts, the console, and gated agent enrolment, per [ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md). Y1–Y5 are unchanged and still open; Y0 still gates everything. Y8 is what retires [ADR 0004](adr/0004-m1-unauthenticated-heartbeat.md), which has already expired by its own terms. |
