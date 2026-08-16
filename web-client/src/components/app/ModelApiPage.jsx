@@ -21,6 +21,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { fetchProviderNodes } from '../../services/api';
+import { storedToken } from '../../services/authApi';
 import { useSession } from '../../hooks/useSession';
 import {
   INFERENCE_BASE_URL,
@@ -181,7 +182,13 @@ export default function ModelApiPage({ onNavigate }) {
 
   const refreshPublicState = async () => {
     try {
-      const [keyResult, nodeResult] = await Promise.all([listApiKeys(), fetchProviderNodes()]);
+      // The registry needs a session now. `listApiKeys` reads the same stored
+      // token internally, so both halves of this pair fail together if the
+      // session has ended -- which is what the 401 branch below relies on.
+      const [keyResult, nodeResult] = await Promise.all([
+        listApiKeys(),
+        fetchProviderNodes({ token: storedToken() }),
+      ]);
       setKeys(keyResult.keys ?? []);
       setGatewayStatus('ok');
       // "Accepting" needs both liveness and the node's own consent. A provider

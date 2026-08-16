@@ -216,8 +216,22 @@ seconds. Watch the console for:
 Then look at the registry:
 
 ```powershell
-(Invoke-RestMethod http://localhost:8080/providers/nodes).nodes |
+# The registry needs a session: every row describes a real machine, so it is
+# not served anonymously. Log in first and reuse the token.
+$s = Invoke-RestMethod -Method Post http://localhost:8080/v1/auth/login `
+  -ContentType application/json `
+  -Body (@{ email = 'you@example.com'; password = 'your-password' } | ConvertTo-Json)
+
+(Invoke-RestMethod http://localhost:8080/providers/nodes `
+  -Headers @{ Authorization = "Bearer $($s.token)" }).nodes |
   Select-Object hostname, liveness, accepts_work, last_heartbeat_at
+```
+
+If this deployment has `SIGNUPS_OPEN=false`, there is no signup form to make
+that account with — create one directly instead:
+
+```powershell
+python -m orchestrator.seed_users you@example.com
 ```
 
 The same data drives the **Nodes** tab of the provider console in
