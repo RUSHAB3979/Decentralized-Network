@@ -70,8 +70,66 @@ def test_node_list_returns_503_not_an_empty_list(client):
     # a 503 means "we cannot currently tell". If the database being down
     # rendered as an empty marketplace, the website would confidently show
     # zero capacity during an outage and nobody would know why.
-    response = client.get("/providers/nodes")
+    #
+    # A token is sent because the endpoint now requires a session. It is not a
+    # real one and does not need to be: with no database the session lookup
+    # cannot complete either, so this still lands on the 503 path. The point of
+    # sending it is to prove the outage is still reported as an outage after
+    # the endpoint was closed -- an unauthenticated 401 here would pass a
+    # weaker test while telling the console the wrong thing.
+    response = client.get(
+        "/providers/nodes", headers={"Authorization": "Bearer nf_sess_notreal"}
+    )
     assert response.status_code == 503
+
+
+def test_node_list_refuses_anonymous_callers(client):
+    # The registry describes real machines belonging to real providers:
+    # hostname, GPU, driver version, installed models, and when they are awake.
+    # It was served anonymously until 2026-08-16. This test exists so that
+    # reverting the gate is a red build rather than a quiet regression.
+    #
+    # 401 arrives before any database work, which is why this passes with no
+    # DATABASE_URL set at all.
+    response = client.get("/providers/nodes")
+    assert response.status_code == 401
+
+
+SIGNUP = {"email": "someone@example.com", "password": "a-long-enough-password"}
+
+
+def test_signup_is_refused_when_signups_are_closed(client, monkeypatch):
+    # 403, not 404 and not 503. The caller cannot fix this by retrying and the
+    # endpoint is not broken, so the response has to say which of those it is.
+    monkeypatch.setenv("SIGNUPS_OPEN", "false")
+    response = client.post("/v1/auth/signup", json=SIGNUP)
+    assert response.status_code == 403
+    assert "closed" in response.json()["detail"]
+
+
+def test_closed_signup_refuses_before_touching_the_database(client, monkeypatch):
+    # There is no DATABASE_URL in this fixture, so a 503 here would prove the
+    # refusal happens after the database work rather than before it. That
+    # ordering is the whole defence: scrypt is deliberately slow, and hashing
+    # first would let anyone spend our CPU against a door we have shut.
+    monkeypatch.setenv("SIGNUPS_OPEN", "false")
+    assert client.post("/v1/auth/signup", json=SIGNUP).status_code == 403
+
+
+def test_signup_still_works_normally_when_open(client, monkeypatch):
+    # 503 rather than 403: the flag is not blocking, and the request got as far
+    # as needing a database. Without this test, a bug that closed signup
+    # permanently would look exactly like the feature working.
+    monkeypatch.setenv("SIGNUPS_OPEN", "true")
+    assert client.post("/v1/auth/signup", json=SIGNUP).status_code == 503
+
+
+def test_an_unrecognised_flag_value_leaves_signups_open(client, monkeypatch):
+    # Fail open on a typo. Someone setting SIGNUPS_OPEN=flase must not
+    # discover it by finding nobody can register, with no error anywhere to
+    # explain why. Closing the door is meant to be a deliberate act.
+    monkeypatch.setenv("SIGNUPS_OPEN", "flase")
+    assert client.post("/v1/auth/signup", json=SIGNUP).status_code == 503
 
 
 def test_validation_runs_before_the_database_is_touched(client):

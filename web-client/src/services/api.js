@@ -102,7 +102,7 @@ const isLocal = typeof window !== 'undefined'
     && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
 
 export const ORCHESTRATOR_URL =
-    import.meta.env.VITE_ORCHESTRATOR_URL
+    import.meta.env?.VITE_ORCHESTRATOR_URL
     ?? (isLocal ? 'http://localhost:8080' : HOSTED_ORCHESTRATOR_URL);
 
 export async function checkOrchestratorHealth() {
@@ -141,18 +141,41 @@ export async function checkOrchestratorHealth() {
 // fallback: a marketplace that displays three fictional RTX 4090s when the
 // backend is down is worse than one that displays an error.
 // ---------------------------------------------------------------------------
-export async function fetchProviderNodes({ timeoutMs = 5000 } = {}) {
+export async function fetchProviderNodes({ timeoutMs = 5000, token = null } = {}) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
+        // The registry stopped being public on 2026-08-16 -- every row is a
+        // description of somebody's actual machine.
+        //
+        // The token is a parameter rather than a `storedToken()` call, and that
+        // is forced rather than stylistic: authApi.js imports ORCHESTRATOR_URL
+        // from this file and uses it at module scope, so importing back into
+        // here would be a cycle that lands in the temporal dead zone and throws
+        // on load. inferenceApi.js sits above both and imports each, which is
+        // the layer where tokens belong. Callers here follow the same shape.
         const res = await fetch(`${ORCHESTRATOR_URL}/providers/nodes`, {
             signal: controller.signal,
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) {
             // 503 means the orchestrator is up but its registry is not. That
             // is a different problem from an unreachable orchestrator, and
             // whoever is debugging needs to be told which one it is.
+            //
+            // 401 is a third thing again, and must not be reported as a
+            // backend fault: the backend is fine and this session is not.
+            // Saying "cannot reach the registry" there would send someone to
+            // check Render for an outage that is not happening.
             const detail = await res.text().catch(() => '');
+            if (res.status === 401) {
+                return {
+                    ok: false,
+                    unauthorized: true,
+                    error: 'Your session has expired. Sign in again to see node telemetry.',
+                    detail,
+                };
+            }
             return {
                 ok: false,
                 error: res.status === 503

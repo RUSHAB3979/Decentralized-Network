@@ -12,6 +12,7 @@
 // be produced by a failed request.
 import { useState, useEffect, useCallback } from 'react';
 import { fetchProviderNodes } from '../services/api';
+import { storedToken } from '../services/authApi';
 
 export const NODE_POLL_MS = 5000;
 
@@ -19,7 +20,11 @@ export function useProviderNodes(pollMs = NODE_POLL_MS) {
     const [result, setResult] = useState({ status: 'loading', nodes: [] });
 
     const load = useCallback(async () => {
-        const response = await fetchProviderNodes();
+        // Read on every tick rather than once at mount. A session that ends
+        // mid-poll -- expiry, a logout in another tab -- has to be seen on the
+        // next request, not replayed from a closure that captured the old
+        // token and keeps sending it until the component unmounts.
+        const response = await fetchProviderNodes({ token: storedToken() });
         setResult(response.ok
             ? {
                 status: 'ok',
@@ -30,6 +35,10 @@ export function useProviderNodes(pollMs = NODE_POLL_MS) {
             : {
                 status: 'error',
                 nodes: [],
+                // Carried through so a surface can distinguish "signed out"
+                // from "backend down" and offer the right thing: a sign-in
+                // link, not a retry button pointed at a healthy server.
+                unauthorized: response.unauthorized ?? false,
                 error: response.error,
                 detail: response.detail,
             });

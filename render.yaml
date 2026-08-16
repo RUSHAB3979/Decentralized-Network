@@ -91,6 +91,24 @@ services:
         value: "120000"
       - key: SESSION_TTL_DAYS
         value: "7"
+
+      # Closed. This deployment is on the open internet and its intended
+      # audience is the team, so accounts are created by hand instead:
+      #
+      #     python -m orchestrator.seed_users <email> [<email> ...]
+      #
+      # The application default is open, so that a fresh clone can create its
+      # first account. Closed is only ever a deliberate act, and this line is
+      # where that act is recorded.
+      #
+      # SET THIS IN THE RENDER DASHBOARD TOO. Whether Render syncs envVars from
+      # this file depends on how the service was created, and that is not
+      # something this file can assert about the running service. Setting both
+      # costs nothing and they cannot disagree; setting only one risks the
+      # value silently not being in effect, which looks exactly like signup
+      # having been left open on purpose.
+      - key: SIGNUPS_OPEN
+        value: "false"
       - key: JOB_LEASE_SEC
         value: "180"
       - key: CLAIM_POLL_INTERVAL_SEC

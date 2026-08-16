@@ -94,6 +94,26 @@ def ttl() -> timedelta:
     return timedelta(milliseconds=max(1000, ms))
 
 
+def signups_open() -> bool:
+    """Whether /v1/auth/signup will create new accounts.
+
+    Read per call rather than captured at import, for the same reason as ttl():
+    the door can then be closed on a running deployment by changing one
+    environment variable, with no code change and no redeploy.
+
+    The default is open, deliberately. A default of closed would mean a fresh
+    clone with no environment cannot create its first account, and whoever hits
+    that has no way to distinguish a deliberate lockdown from a broken install.
+    The production deployment sets SIGNUPS_OPEN=false explicitly, so the closed
+    state is always something somebody chose and can find.
+
+    Anything other than a recognised falsy word counts as open. A typo in this
+    variable must not silently lock everybody out.
+    """
+    value = os.getenv("SIGNUPS_OPEN", "true").strip().lower()
+    return value not in {"false", "0", "no", "off"}
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Create the M1 tables on boot, but never refuse to boot over it.
@@ -315,13 +335,27 @@ def heartbeat(req: HeartbeatRequest):
 
 
 @app.get("/providers/nodes", response_model=NodeList)
-def list_nodes():
-    """Every enrolled node, most recently seen first.
+def list_nodes(authorization: str | None = Header(default=None)):
+    """Every enrolled node, most recently seen first. Requires a session.
 
     Liveness is computed here from `last_heartbeat_at` rather than read from a
     column, for the reason set out in liveness.py: a derived value cannot claim
     a heartbeat that never arrived.
+
+    Why this needs authentication at all, when it creates nothing and changes
+    nothing: every row is a hardware fingerprint of somebody's actual computer
+    -- hostname, OS build, CPU model, GPU model, driver version, installed
+    models, and the times that machine is awake. Served anonymously from a
+    public URL, that is a map of the fleet for anyone who asks, and it is our
+    providers' machines being described, not ours.
+
+    A session is the right gate rather than an API key: keys are for
+    programmatic inference, and this endpoint exists to render a console page
+    for a signed-in human. When provider accounts land (ADR 0005) this should
+    narrow further, from "any signed-in user" to "the account that owns the
+    node" -- today there is no owner column to filter on.
     """
+    _authenticate_session(authorization)
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
@@ -790,7 +824,23 @@ def signup(req: SignupRequest):
     Returning a session here rather than making the caller log in separately is
     not just convenience: it means the password is sent once instead of twice
     for the same outcome.
+
+    Closed deployments refuse here, before anything else happens. Two reasons
+    it is first: hashing a password is scrypt and deliberately expensive, so
+    doing it ahead of the check would turn a closed endpoint into a free way to
+    burn our CPU; and the refusal must not depend on whether the address
+    already exists, or a closed signup form becomes an oracle for which of your
+    colleagues has an account.
     """
+    if not signups_open():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "new accounts are closed on this deployment. Ask an existing "
+                "member to create one for you."
+            ),
+        )
+
     email = auth.normalise_email(req.email)
     user_id = f"usr_{uuid4().hex}"
     password_hash = auth.hash_password(req.password)
