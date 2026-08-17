@@ -13,10 +13,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@graphql-tools/schema": "^10.0.16",
+    "@graphql-tools/schema": "^10.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "graphql": "^17.0.2",
-    "graphql-yoga": "^5.10.6",
+    "graphql-yoga": "^5.21.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
