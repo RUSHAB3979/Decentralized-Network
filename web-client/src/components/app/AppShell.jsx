@@ -141,9 +141,9 @@ const AppShell = ({ currentRoute, onNavigate, children, session }) => {
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-3.5">
           <div className="flex items-center gap-2 text-[11px] font-medium text-slate-300">
             <Activity className="h-3.5 w-3.5 text-emerald-400" />
-            Frontend sandbox
+            Partly live console
           </div>
-          <p className="mt-2 text-[11px] leading-5 text-slate-600">Model APIs run real inference on enrolled providers. Billing, render, workstations and gaming are still preview data.</p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-600">Model APIs and Blender renders use live orchestrator endpoints. Billing, workstations, gaming, and render pricing remain preview data.</p>
         </div>
       </div>
     </div>

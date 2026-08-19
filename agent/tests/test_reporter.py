@@ -16,13 +16,14 @@ from __future__ import annotations
 import json
 import re
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
 
-from agent import identity, reporter
+from agent import identity, reporter, worker
 from agent.state import ProviderState
-from agent.telemetry import Gpu, Host, Model, Node, Ollama, Telemetry
+from agent.telemetry import Gpu, Host, Model, Node, Ollama, Orchestrator, Telemetry
 
 # Mirrors NODE_ID in orchestrator/models.py. Duplicated on purpose: the agent
 # cannot import from the orchestrator (that package is not installed on a
@@ -60,6 +61,13 @@ def telemetry(*, gpu: bool = True, rentable: bool = True, accepts: bool = True):
             ],
         ),
         node=Node(status="idle", detail="ready for work", accepts_work=accepts),
+        # Required rather than defaulted, so that a new construction site has to
+        # say what the orchestrator link is instead of silently inheriting a
+        # healthy-looking placeholder. What this field reports is asserted in
+        # agent/tests/test_link_state.py.
+        orchestrator=Orchestrator(
+            status="online", detail="heartbeat accepted", url="http://localhost:8080"
+        ),
     )
 
 
@@ -222,3 +230,128 @@ def test_loop_survives_an_unreachable_orchestrator(monkeypatch):
 
     assert attempts, "reporter never attempted a request"
     assert not thread.is_alive(), "reporter thread did not exit when stopped"
+
+
+def test_a_machine_without_blender_advertises_no_render_version(monkeypatch):
+    """None, not a guess and not an empty string.
+
+    The orchestrator matches a job's requested release series against this
+    column. A node that reported "" or "unknown" would still not match anything
+    -- but a node that reported a guessed version WOULD match, take a frame, and
+    render it on the wrong Blender. The output would be plausible, subtly
+    different, and nothing anywhere would raise.
+    """
+    monkeypatch.setattr(reporter.blender, "find_binary", lambda: None)
+    assert reporter.metrics_payload(telemetry())["blender_version"] is None
+
+
+def test_the_reported_version_is_the_one_the_worker_would_actually_run(monkeypatch):
+    """The reporter and the worker must not be able to disagree.
+
+    If they did, the orchestrator would be told this node serves 4.3 while the
+    worker held a 4.2 binary: every frame matched to it would be claimed and
+    then rejected, burning an attempt each time against a job that was never
+    going to render here. Both read the same cached probe, so this is structural
+    rather than a convention somebody has to remember.
+    """
+    monkeypatch.setattr(reporter.blender, "find_binary", lambda: Path("blender.exe"))
+    monkeypatch.setattr(reporter.blender, "detect_version", lambda binary: "4.3.2")
+
+    reported = reporter.metrics_payload(telemetry())["blender_version"]
+    assert reported == "4.3.2"
+    # A bare object() for the supervisor: this test is about the version
+    # probe, and Worker does not touch the runtime to construct itself.
+    assert reported == worker.Worker(ProviderState(), object()).blender_version
+
+
+def test_having_blender_is_not_the_same_as_being_allowed_to_render(monkeypatch):
+    """The agent reports a capability and never a permission.
+
+    Eligibility lives in provider_nodes.render_eligible, defaults FALSE, and is
+    set by an operator. A .blend can carry embedded Python, so agreeing to run
+    one is the machine owner's decision -- it must not be something the software
+    can grant itself by noticing an installed binary.
+    """
+    monkeypatch.setattr(reporter.blender, "find_binary", lambda: Path("blender.exe"))
+    monkeypatch.setattr(reporter.blender, "detect_version", lambda binary: "4.3.2")
+    payload = reporter.metrics_payload(telemetry())
+    assert "render_eligible" not in payload
+    assert not any("eligib" in key for key in payload)
+
+
+def test_heartbeat_carries_the_node_credential():
+    """Unauthenticated heartbeats let anyone who learns a node id impersonate it.
+
+    node_id is not a secret -- it appears in the marketplace listing and in the
+    agent's own logs -- so before the credential was required, a stranger could
+    post metrics for someone else's machine: mark it idle when it was busy,
+    advertise models it does not have, or hold it visible after it went dark.
+    """
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json={
+                "node_id": "x",
+                "received_at": "2026-08-11T12:00:00Z",
+                "heartbeat_interval_s": 15,
+            },
+        )
+
+    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep.registered = True
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert rep.heartbeat(client, telemetry()) is True
+
+    assert seen["authorization"] == "Bearer test-node-token"
+
+
+def test_a_rejected_credential_is_discarded_and_the_node_re_registers(monkeypatch):
+    """A 401 must not be a permanent state.
+
+    The token on disk and the digest in the database can disagree after a
+    restore or a re-install. Keeping the local copy would fail every heartbeat
+    identically for as long as the app ran, and the repair -- registration,
+    which mints a new token -- would never be reached.
+    """
+    cleared = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "bad credential"})
+
+    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep.registered = True
+    monkeypatch.setattr(
+        reporter.identity, "clear_node_token", lambda: cleared.append(True)
+    )
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert rep.heartbeat(client, telemetry()) is False
+
+    assert cleared, "the rejected token was kept"
+    assert rep.registered is False
+
+
+def test_a_node_with_no_credential_registers_instead_of_heartbeating(monkeypatch):
+    """No token means no request at all, not an unauthenticated one.
+
+    Sending the heartbeat anyway would spend a round trip to be refused, and
+    the node cannot be given work without a credential regardless -- so the
+    only useful thing to do is go back through registration, which is what
+    produces one.
+    """
+    monkeypatch.setattr(reporter.identity, "node_token", lambda: None)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url)
+        return httpx.Response(200, json={})
+
+    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep.registered = True
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert rep.heartbeat(client, telemetry()) is False
+
+    assert calls == [], "heartbeated without a credential"
+    assert rep.registered is False

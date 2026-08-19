@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Boxes,
+  Cloud,
+  CloudOff,
   Cpu,
   HardDrive,
   Loader2,
@@ -24,6 +26,18 @@ const STATUS_TONE = {
   starting: ['bg-slate-400', 'text-slate-400', 'border-white/10'],
   stopped: ['bg-slate-500', 'text-slate-500', 'border-white/10'],
   error: ['bg-red-400', 'text-red-300', 'border-red-300/25'],
+};
+
+// The orchestrator link is reported separately from the node status on purpose.
+// A provider whose GPU is perfectly healthy but who cannot reach us earns
+// nothing, and before this existed the app had no way to say so: the address
+// lived only in a print() to a console the packaged build never creates.
+// `connecting` is amber rather than red because it is the normal state for the
+// first few seconds of every launch.
+const LINK_TONE = {
+  online: ['text-emerald-300', 'Connected'],
+  connecting: ['text-amber-300', 'Never connected'],
+  offline: ['text-red-300', 'Lost contact'],
 };
 
 const Card = ({ icon: Icon, title, accent = 'text-slate-500', children }) => (
@@ -103,7 +117,9 @@ export default function DesktopApp() {
     );
   }
 
-  const { host, gpu, ollama, node, rentable } = data;
+  const { host, gpu, ollama, node, rentable, orchestrator } = data;
+  const [linkAccent, linkLabel] = LINK_TONE[orchestrator.status] ?? LINK_TONE.connecting;
+  const linked = orchestrator.status === 'online';
   const [dot, text, border] = STATUS_TONE[node.status] ?? STATUS_TONE.stopped;
 
   return (
@@ -140,6 +156,52 @@ export default function DesktopApp() {
           </div>
         </div>
       )}
+
+      {/* A separate banner from the one above, because these are separate
+          problems with separate fixes. A capable machine that never reached the
+          marketplace looks identical to a working node from every other panel
+          on this page - which is exactly how a provider spent an afternoon
+          reporting into localhost while the tray showed green. */}
+      {!linked && (
+        <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.03] p-4">
+          <CloudOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-amber-100/90">
+              {orchestrator.status === 'offline'
+                ? 'Lost contact with the marketplace'
+                : 'This node has not reached the marketplace'}
+            </p>
+            <p className="mt-1 text-[11px] leading-5 text-amber-100/50">
+              {orchestrator.status === 'offline'
+                ? 'It connected earlier, so the address is right. Check this machine’s network; if that is fine, the marketplace may be down and this will recover on its own. '
+                : 'No job can be sent to this machine until it registers. If this does not clear within a minute, the address below is probably wrong — set ORCHESTRATOR_URL and restart the app. '}
+              Earnings stay at zero until it connects.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Always rendered, healthy or not. A connection indicator that does not
+          name its destination is what made the original failure invisible: the
+          node was green, accepting work, and reporting to a machine that was
+          not the marketplace. */}
+      <section className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.018] p-5">
+        <div className="flex items-center gap-2">
+          {linked ? (
+            <Cloud className={`h-4 w-4 ${linkAccent}`} />
+          ) : (
+            <CloudOff className={`h-4 w-4 ${linkAccent}`} />
+          )}
+          <h2 className="font-mono text-[9px] uppercase tracking-[0.18em] text-slate-600">
+            Marketplace
+          </h2>
+          <span className={`ml-auto text-[11px] font-medium ${linkAccent}`}>{linkLabel}</span>
+        </div>
+        <div className="mt-4">
+          <Row label="Reporting to" value={orchestrator.url || 'not configured'} mono />
+          <Row label="Last exchange" value={orchestrator.detail || 'none yet'} mono />
+        </div>
+      </section>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <Card icon={MonitorCog} title="Graphics" accent={gpu ? 'text-emerald-300' : 'text-slate-700'}>

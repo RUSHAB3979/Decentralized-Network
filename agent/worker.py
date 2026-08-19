@@ -1,4 +1,4 @@
-"""Claims inference jobs from the orchestrator and runs them on this machine.
+"""Claims inference or render work and runs it on this machine.
 
 This is the thread that makes a provider actually earn. Everything before it --
 registration, heartbeat, telemetry -- only told the marketplace this machine
@@ -26,10 +26,10 @@ What this deliberately does not do
 ----------------------------------
 It runs one job at a time. No concurrency, no queueing locally, no prefetch.
 That is not laziness -- concurrency on a provider box is a hand-built area under
-ADR 0002, because getting it wrong degrades quietly: a second request while a
-model is loaded evicts it, the next request pays a cold start, throughput
-collapses, and every individual request still succeeds. Nothing raises. One at a
-time is the version whose behaviour is obvious.
+ADR 0002, because getting it wrong degrades quietly: a render and an inference
+request sharing the GPU evict each other's memory, both can still return the
+right answer, and total throughput collapses. Nothing raises. One at a time is
+the version whose behaviour is obvious.
 
 It also does not renew a lease. If a job takes longer than the orchestrator's
 lease window the work is handed to somebody else and this agent's result is
@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 import httpx
 
 from agent import identity
+from agent.runtime import blender
 from agent.runtime.ollama import OllamaSupervisor
 from agent.state import ProviderState, Status
 
@@ -95,6 +97,15 @@ class Worker:
         self.node_id = identity.node_id()
         # Overwritten by the server's answer on the first successful claim.
         self.poll_interval = DEFAULT_POLL_INTERVAL_S
+        # Discovery and the version probe happen once for this worker's
+        # lifetime. Repeating `blender --version` on every empty poll would
+        # flash a console without CREATE_NO_WINDOW and would turn an idle fleet
+        # into constant local process churn. More importantly, a binary that
+        # cannot identify itself must not claim work for a guessed version.
+        # Shared with the reporter through blender.installation(), so the
+        # version this worker will actually run is the same one the orchestrator
+        # was told about. Two independent probes could disagree.
+        self.blender_binary, self.blender_version = blender.installation()
 
     # -- credential -------------------------------------------------------
     #
@@ -113,17 +124,13 @@ class Worker:
 
     # -- one cycle --------------------------------------------------------
 
-    def claim(self, client: httpx.Client) -> dict | None:
-        """Ask for a job. `None` means there is nothing to do, which is normal.
-
-        Also records the server's requested poll interval in `self.poll_interval`
-        so the caller can pace itself from it.
-        """
+    def _claim(self, client: httpx.Client, path: str, item_key: str) -> dict | None:
+        """Ask one claim endpoint, sharing credential and pacing semantics."""
         headers = self._auth_header()
         if headers is None:
             return None
         response = client.post(
-            f"{self.base_url}/providers/work/claim",
+            f"{self.base_url}{path}",
             params={"node_id": self.node_id},
             headers=headers,
             timeout=CLAIM_TIMEOUT_S,
@@ -133,8 +140,12 @@ class Worker:
             # Almost always because the node re-registered elsewhere, or the
             # orchestrator's database was restored. Dropping the local token
             # makes the reporter mint a fresh one on its next registration,
-            # which is the self-healing path.
-            print("[worker] node credential rejected; discarding it to force re-registration")
+            # which is the self-healing path. Both workload classes must take
+            # this exact path: retrying either with the rejected token would
+            # leave one half of the worker permanently dead.
+            print(
+                "[worker] node credential rejected; discarding it to force re-registration"
+            )
             identity.clear_node_token()
             return None
         response.raise_for_status()
@@ -142,7 +153,24 @@ class Worker:
         interval = body.get("poll_interval_s")
         if isinstance(interval, (int, float)) and interval > 0:
             self.poll_interval = float(interval)
-        return body.get("job")
+        return body.get(item_key)
+
+    def claim(self, client: httpx.Client) -> dict | None:
+        """Ask for an inference job. `None` means no work, which is normal.
+
+        Also records the server's requested poll interval in `self.poll_interval`
+        so the caller can pace itself from it.
+        """
+        return self._claim(client, "/providers/work/claim", "job")
+
+    def claim_render(self, client: httpx.Client) -> dict | None:
+        """Ask for one frame only when this process proved Blender is usable."""
+        if self.blender_binary is None or self.blender_version is None:
+            # Not calling the endpoint is stronger than claiming and then
+            # failing: the latter burns a lease and makes the customer wait for
+            # it to lapse before a real render node gets the frame.
+            return None
+        return self._claim(client, "/providers/render/claim", "frame")
 
     def run(self, job: dict, runtime: httpx.Client | None = None) -> dict:
         """Execute one job against the local runtime and shape the result.
@@ -204,6 +232,32 @@ class Worker:
             ),
         }
 
+    def run_render(self, frame: dict, storage: httpx.Client | None = None) -> dict:
+        """Execute one frame and shape the render result wire body."""
+        if self.blender_binary is None or self.blender_version is None:
+            raise blender.BlenderError("rendering was not enabled at worker startup")
+        output_bytes, render_seconds = blender.render_frame(
+            self.blender_binary,
+            installed_version=self.blender_version,
+            requested_version=frame["blender_version"],
+            engine=frame["engine"],
+            output_format=frame["output_format"],
+            frame_number=frame["frame_number"],
+            source_url=frame["source_url"],
+            output_url=frame["output_url"],
+            # Lets the runtime download this job's scene once instead of once
+            # per frame. Passed from the claim rather than tracked here, so a
+            # frame reclaimed from another node still identifies its own job.
+            job_id=frame["job_id"],
+            storage=storage,
+        )
+        return {
+            "status": "completed",
+            "output_bytes": output_bytes,
+            "render_seconds": render_seconds,
+            "error_code": None,
+        }
+
     def report(self, client: httpx.Client, job_id: str, result: dict) -> None:
         headers = self._auth_header()
         if headers is None:
@@ -224,6 +278,27 @@ class Worker:
             return
         response.raise_for_status()
 
+    def report_render(self, client: httpx.Client, frame_id: str, result: dict) -> None:
+        headers = self._auth_header()
+        if headers is None:
+            return
+        response = client.post(
+            f"{self.base_url}/providers/render/frames/{frame_id}/result",
+            params={"node_id": self.node_id},
+            headers=headers,
+            json=result,
+            timeout=RESULT_TIMEOUT_S,
+        )
+        if response.status_code == 409:
+            # As with inference, lease loss transfers ownership. The uploaded
+            # bytes do not make this frame ours again, and retrying this POST
+            # would only repeat a conflict while another node serves it.
+            print(
+                f"[worker] frame {frame_id} was reassigned before this result arrived"
+            )
+            return
+        response.raise_for_status()
+
 
 def run(
     state: ProviderState,
@@ -233,6 +308,28 @@ def run(
     base_url: str | None = None,
 ) -> None:
     """Thread entry point. Returns only when `stop` is set.
+
+    A thin wrapper so that the cached scene file is deleted however the loop
+    ends -- stop signal, unexpected exception, or interpreter shutdown. The
+    cache exists to avoid re-downloading a job's .blend for every frame, and
+    the price of holding it is that somebody else's project sits on this
+    provider's disk between frames. Closing the app has to end that, and a
+    cleanup that only runs on the tidy path is not the same promise.
+    """
+    try:
+        _run_loop(state, supervisor, accepting, stop, base_url)
+    finally:
+        blender.forget_source_cache()
+
+
+def _run_loop(
+    state: ProviderState,
+    supervisor: OllamaSupervisor,
+    accepting: threading.Event,
+    stop: threading.Event,
+    base_url: str | None = None,
+) -> None:
+    """The loop itself.
 
     Like reporter.run, this loop never exits on error. A provider whose internet
     dropped, or whose orchestrator was restarted, must resume on their own --
@@ -253,8 +350,17 @@ def run(
                     return
                 continue
 
+            job = None
+            frame = None
             try:
                 job = worker.claim(client)
+                if not job:
+                    # A successful claim is already ownership. Polling the
+                    # second endpoint after receiving a job would prefetch a
+                    # frame and violate the one-GPU-unit invariant before any
+                    # execution even started, so render is asked only when the
+                    # inference endpoint handed us nothing.
+                    frame = worker.claim_render(client)
                 backoff = MIN_BACKOFF_S
                 poll_interval = worker.poll_interval
             except (httpx.HTTPError, ValueError, OSError) as exc:
@@ -264,7 +370,7 @@ def run(
                 backoff = min(backoff * 2, MAX_BACKOFF_S)
                 continue
 
-            if not job:
+            if not job and not frame:
                 # Nothing to do. Wait before asking again.
                 #
                 # This sleep is load-bearing, and its absence was a bug: the
@@ -281,30 +387,72 @@ def run(
                     return
                 continue
 
-            job_id = job.get("job_id")
             previous = (state.status, state.detail)
-            state.set(Status.BUSY, f"serving {job.get('model')}")
-            try:
-                result = worker.run(job)
-            except (httpx.HTTPError, ValueError, OSError, KeyError) as exc:
-                print(f"[worker] job {job_id} failed: {exc.__class__.__name__}: {exc}")
-                result = {
-                    "status": "failed",
-                    "error_code": exc.__class__.__name__,
-                }
+            if job:
+                job_id = job.get("job_id")
+                state.set(Status.BUSY, f"serving {job.get('model')}")
+                try:
+                    result = worker.run(job)
+                except (httpx.HTTPError, ValueError, OSError, KeyError) as exc:
+                    print(
+                        f"[worker] job {job_id} failed: {exc.__class__.__name__}: {exc}"
+                    )
+                    result = {
+                        "status": "failed",
+                        "error_code": exc.__class__.__name__,
+                    }
 
-            try:
-                worker.report(client, job_id, result)
-            except (httpx.HTTPError, OSError) as exc:
-                # The work was done and the answer is lost. The job's lease will
-                # lapse and another provider will repeat it, which is the
-                # correct outcome for the customer and a wasted GPU-minute for
-                # this one. Logged loudly because it is exactly the event that
-                # would otherwise look like the request simply never happened.
-                print(
-                    f"[worker] job {job_id} ran but the result could not be "
-                    f"delivered: {exc.__class__.__name__}: {exc}"
-                )
+                try:
+                    worker.report(client, job_id, result)
+                except (httpx.HTTPError, OSError) as exc:
+                    # The work was done and the answer is lost. The job's lease
+                    # will lapse and another provider will repeat it, which is
+                    # the correct outcome for the customer and a wasted
+                    # GPU-minute for this one. Logged loudly because it is
+                    # exactly the event that would otherwise look like the
+                    # request simply never happened.
+                    print(
+                        f"[worker] job {job_id} ran but the result could not be "
+                        f"delivered: {exc.__class__.__name__}: {exc}"
+                    )
+            else:
+                frame_id = frame.get("frame_id")
+                frame_number = frame.get("frame_number")
+                state.set(Status.BUSY, f"rendering frame {frame_number}")
+                render_started = time.monotonic()
+                try:
+                    result = worker.run_render(frame)
+                except (
+                    blender.BlenderError,
+                    httpx.HTTPError,
+                    ValueError,
+                    OSError,
+                    KeyError,
+                ) as exc:
+                    print(
+                        f"[worker] frame {frame_id} failed: "
+                        f"{exc.__class__.__name__}: {exc}"
+                    )
+                    result = {
+                        "status": "failed",
+                        "output_bytes": 0,
+                        # Failed time is still evidence about work attempted on
+                        # this node, never a bill. Metering remains hand-built.
+                        "render_seconds": max(0.0, time.monotonic() - render_started),
+                        "error_code": exc.__class__.__name__,
+                    }
+
+                try:
+                    worker.report_render(client, frame_id, result)
+                except (httpx.HTTPError, OSError) as exc:
+                    # The artifact may already be in storage, but the frame is
+                    # not complete until the orchestrator accepts this result.
+                    # Lease expiry and reassignment are therefore still the
+                    # customer-correct recovery path.
+                    print(
+                        f"[worker] frame {frame_id} ran but the result could not "
+                        f"be delivered: {exc.__class__.__name__}: {exc}"
+                    )
 
             # Return to whatever the supervisor last decided, rather than
             # asserting IDLE -- Ollama may have died while this job ran, and

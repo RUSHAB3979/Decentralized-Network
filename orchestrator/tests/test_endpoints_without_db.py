@@ -59,10 +59,33 @@ def test_register_returns_503_not_500(client):
 
 
 def test_heartbeat_returns_503_not_500(client):
+    # A credential is sent for the same reason the node-list test below sends
+    # one: the heartbeat is authenticated now, and without a token this would
+    # pass as a 401 while proving nothing about the outage path. The token is
+    # not real and does not have to be -- with no database the node lookup
+    # cannot complete, which is exactly the case under test.
+    response = client.post(
+        "/providers/heartbeat",
+        json={"node_id": NODE_ID, "status": "idle"},
+        headers={"Authorization": "Bearer not-a-real-node-token"},
+    )
+    assert response.status_code == 503
+
+
+def test_heartbeat_without_a_credential_is_refused(client):
+    """node_id is public; the right to speak for it is not.
+
+    It is printed in the agent's logs and returned in the marketplace listing,
+    so before the heartbeat was authenticated, knowing one was enough to post
+    telemetry as that machine -- hold a dead node visible, mark a busy one
+    idle, or advertise models it does not have. The refusal is checked here
+    rather than in a database test because it must not depend on the database
+    being up: it is decided from the request alone.
+    """
     response = client.post(
         "/providers/heartbeat", json={"node_id": NODE_ID, "status": "idle"}
     )
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
 def test_node_list_returns_503_not_an_empty_list(client):
@@ -249,3 +272,114 @@ def test_dispatch_wait_outlives_a_single_claim_cycle():
     from orchestrator.main import claim_poll_interval_s, dispatch_wait_s
 
     assert dispatch_wait_s() > claim_poll_interval_s()
+
+
+# -- admission control ------------------------------------------------------
+
+
+def test_repeated_signups_are_rate_limited_before_the_password_is_hashed(client):
+    """scrypt is a lever, and an unauthenticated caller must not hold it.
+
+    The KDF is deliberately slow and memory-hungry -- roughly 16 MiB and real
+    CPU per call. On a 512 MB instance a few dozen concurrent signups for
+    addresses that do not exist saturate the machine, and every other endpoint
+    stops answering. Rate limiting is the only defence available here, because
+    the whole point of a signup is that the caller has proved nothing yet.
+
+    The refusal is asserted to arrive with a Retry-After: a 429 without one
+    tells the client to back off by an amount it has to guess, and clients that
+    guess badly retry immediately.
+    """
+    seen = [
+        client.post("/v1/auth/signup", json=SIGNUP).status_code for _ in range(12)
+    ]
+    assert 429 in seen, seen
+
+    refused = client.post("/v1/auth/signup", json=SIGNUP)
+    assert refused.status_code == 429
+    assert int(refused.headers["Retry-After"]) >= 1
+
+
+def test_logins_are_limited_per_account_as_well_as_per_caller(client, monkeypatch):
+    """One limiter is not enough, and the two answer different attacks.
+
+    A per-caller limit alone leaves a distributed guessing run against one known
+    address free to try thousands of passwords for it, every source staying
+    comfortably inside its own allowance. A per-account limit alone lets one
+    caller work through a list of addresses at full speed.
+    """
+    from orchestrator import limits
+
+    # Stand in for a distributed run: the per-caller limiter is made permissive
+    # so that the only thing left to refuse these attempts is the per-account
+    # one. Real attackers achieve the same effect with more addresses.
+    monkeypatch.setattr(limits, "auth_by_address", limits.RateLimiter(10_000, 60))
+
+    seen = []
+    for _ in range(limits.auth_by_account.limit + 2):
+        seen.append(
+            client.post(
+                "/v1/auth/login",
+                json={"email": "victim@example.com", "password": "x" * 12},
+            ).status_code
+        )
+    assert 429 in seen, seen
+
+    # And the address is normalised before it is counted, so changing the
+    # capitalisation is not a fresh budget.
+    response = client.post(
+        "/v1/auth/login", json={"email": "VICTIM@example.com", "password": "x" * 12}
+    )
+    assert response.status_code == 429
+
+
+def test_a_rate_limited_caller_is_refused_without_reaching_the_database(client):
+    # Ordering, stated as a test. If the limit were applied after the lookup,
+    # every refused attempt would still cost a connection -- and under the load
+    # this exists to survive, connections are the resource that runs out first.
+    for _ in range(20):
+        client.post("/v1/auth/login", json={"email": "a@b.co", "password": "x" * 12})
+
+    response = client.post(
+        "/v1/auth/login", json={"email": "a@b.co", "password": "x" * 12}
+    )
+    assert response.status_code == 429
+    assert "unavailable" not in response.json()["detail"].lower()
+
+
+# -- security headers -------------------------------------------------------
+
+
+def test_every_response_carries_the_security_headers(client):
+    """Including the ones no handler wrote.
+
+    These are set as middleware rather than per-route precisely so that a 422
+    from validation, a 404 for a path that does not exist, and a 500 from an
+    unhandled exception are covered too -- the responses a per-route decorator
+    would miss are the ones most likely to reflect input back at a browser.
+    """
+    for response in (
+        client.get("/service"),
+        client.get("/health"),
+        client.get("/no-such-path"),
+        client.post("/v1/auth/signup", json={"email": "bad", "password": "short"}),
+    ):
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["Referrer-Policy"] == "no-referrer"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "default-src 'none'" in response.headers["Content-Security-Policy"]
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+
+
+def test_the_documentation_page_is_exempt_from_the_content_policy(client):
+    """A policy that breaks /docs would be quietly reverted by whoever hit it.
+
+    Swagger UI loads its assets from a CDN, so default-src 'none' leaves an
+    empty frame that loads forever. The rest of the headers still apply -- only
+    the content policy is lifted, and only here.
+    """
+    response = client.get("/docs")
+    assert response.status_code == 200
+    assert "Content-Security-Policy" not in response.headers
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
