@@ -11,21 +11,32 @@ Status values: `pending` · `in_progress` · `blocked` · `done`
 
 ## Current priority
 
+**Y0 and Y1 are done.** Y0 merged in [#47](https://github.com/RUSHAB3979/Decentralized-Network/pull/47);
+Y1 signed M0/M1 off from a genuine clean clone in
+[#50](https://github.com/RUSHAB3979/Decentralized-Network/pull/50), including both
+failure paths, the self-heal, and two README defects filed as
+[#48](https://github.com/RUSHAB3979/Decentralized-Network/issues/48) and
+[#49](https://github.com/RUSHAB3979/Decentralized-Network/issues/49) rather than
+fixed silently. That is the standard for the rest of this file. Nothing gates you
+now.
+
 **Y6 — the provider account, console, and agent enrolment.** Assigned 2026-08-16;
-see [ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md) for the
-decisions it implements. This is now the main body of your work.
+see [ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md). This is still
+the main body of your work and it is where to go next.
 
-**Y0 still gates it.** Nobody writes a feature until their first PR is merged, and
-yours is not. Do Y0 first — it is one line in `CONTRIBUTORS.md` and it exists to
-prove clone → branch → CI → merge works for you before something important
-depends on it.
+**Y12 and Y13 were added 2026-08-18** for the rendering vertical
+([ADR 0006](adr/0006-render-batch-jobs.md)). They are schema and infrastructure,
+which is your surface, but they sit *behind* Y6–Y11 in priority — do not start
+them while the provider console is unbuilt. The one exception is Y13's first
+checkbox: verifying whether Cloudflare R2's free tier needs a card on file is ten
+minutes of work and the answer changes what other people build, so it is worth
+doing out of order.
 
-Y1–Y5 below are unchanged and still open. Y1 in particular was never done, and M0
-was signed off without it; that is recorded honestly rather than quietly closed.
+Y2–Y5 remain open and unchanged.
 
 ---
 
-## Y0 — Track 0: first PR · `pending`
+## Y0 — Track 0: first PR · `done` — merged 2026-08-17 ([#47](https://github.com/RUSHAB3979/Decentralized-Network/pull/47))
 
 Add yourself a line in `CONTRIBUTORS.md` and open a PR. The file does not
 exist yet — creating it with your line in it is the task.
@@ -35,11 +46,11 @@ works for you before anything important depends on it. **Nobody writes a
 feature until their first PR is merged** — a team where people have never run
 CI is not a team yet.
 
-- [ ] PR opened, CI green, merged
+- [x] PR opened, CI green, merged
 
 ---
 
-## Y1 — Verify M0 from a clean clone · `pending` · **blocking**
+## Y1 — Verify M0 from a clean clone · `done` — signed off 2026-08-16 ([#50](https://github.com/RUSHAB3979/Decentralized-Network/pull/50))
 
 You are the verifier on M0's sign-off. Read this section carefully, because
 the thing being tested is not what most people assume.
@@ -109,11 +120,17 @@ diagnosis; a summary throws away the part that identifies the cause.
 
 Title format: `M0 verify: <step> fails on clean clone`
 
-- [ ] Clean clone completed
-- [ ] Happy path verified (all three checks)
-- [ ] Both failure paths verified with correct exit codes
-- [ ] Every deviation from the README filed as an issue
-- [ ] Re-run after fixes, no questions needed → **M0 signed off**
+- [x] Clean clone completed
+- [x] Happy path verified (all three checks)
+- [x] Both failure paths verified with correct exit codes
+- [x] Every deviation from the README filed as an issue — [#48](https://github.com/RUSHAB3979/Decentralized-Network/issues/48), [#49](https://github.com/RUSHAB3979/Decentralized-Network/issues/49)
+- [x] Re-run after fixes, no questions needed → **M0 signed off**
+
+**Two items remain open and are not defects in this work.** The verifying machine
+has no NVIDIA GPU, so a real GPU-served completion and the true `404`-unknown-model
+path are still unverified; and the Nodes tab was confirmed at the API level rather
+than visually. Both need hardware, not another pass. Recorded in
+`docs/Tasks/tasks.md` rather than left implied.
 
 ---
 
@@ -312,7 +329,7 @@ after this change.
 The tables from Y6, plus `/v1/provider/auth/signup`, `/login`, `/logout`, `/me`,
 and a `_authenticate_provider_session` helper.
 
-`orchestrator/main.py:707` is the customer version of that helper. Read it
+`orchestrator/main.py:741` is the customer version of that helper. Read it
 completely before writing yours — including the comment explaining why "no such
 token", "expired" and "revoked" all return the same message. That is not
 laziness; distinguishing them tells an attacker holding a stale token that it was
@@ -444,6 +461,85 @@ is how a placeholder becomes a figure somebody repeats as a fact.
 
 ---
 
+## Y12 — Design the render job schema · `pending`
+
+**DDL in a document first. Again.** This is the third time this file has carried
+that instruction, and Y3 is still the worked example of what happens when it is
+skipped. Design, then apply — they are different activities and the second is much
+harder to undo.
+
+Read [ADR 0006](adr/0006-render-batch-jobs.md) before anything else. It decides the
+shape; you decide the columns.
+
+Deliver `docs/schema/render-jobs.md`:
+
+- [ ] `render_jobs` — one row per submission. Status values, and **which of them
+      are stored versus derived**. ADR 0006 decision 4 says job status is derived
+      from its frames at read time; if you disagree, argue it in the document
+      rather than quietly storing it.
+- [ ] `render_frames` — one row per frame, carrying its own `status`, `node_id`,
+      `lease_expires_at` and `attempts`. This is the unit of claim, lease and
+      retry, so its index has to match the claim query the way
+      `inference_jobs_claimable_idx` matches its own (`schema.sql:242`).
+- [ ] `provider_nodes.render_eligible` and `users.render_enabled` — both
+      `NOT NULL DEFAULT FALSE`. **The default is the entire safety property.**
+      A column that defaults `TRUE` here means every provider who installs the
+      app tomorrow starts running strangers' code.
+- [ ] **Blender version.** ADR 0006 lists this as a silent-failure class: the same
+      file on a different build produces different pixels and nothing raises.
+      Either the node reports its version as a capability and selection matches on
+      it, or the product supports exactly one version. Choose in this document.
+- [ ] **What `attempts` is for, and what bounds it.** A frame that fails
+      deterministically — a corrupt file, a missing texture — will be retried by
+      every eligible node in turn unless something stops it. Say what stops it.
+- [ ] The retention question, so it is answered somewhere before Y13 acts on it:
+      how long a source `.blend` and its artifacts are kept.
+- [ ] Open questions listed explicitly rather than quietly decided.
+
+Then apply the tables. Two `CREATE TABLE IF NOT EXISTS` and two
+`ADD COLUMN IF NOT EXISTS`, which is still inside the ceiling `schema.sql:151`
+describes — note in the document whether you still believe that after writing it.
+This is the third consecutive feature to claim it.
+
+- [ ] Tables applied idempotently, matching the document
+- [ ] Re-running the schema against a populated database changes nothing
+
+---
+
+## Y13 — Object storage: the bucket, and what it is allowed to keep · `pending`
+
+Renders move files. ADR 0006 decision 3 puts them in object storage with the
+orchestrator minting short-lived presigned URLs, so bytes travel browser→storage
+and storage→provider and never through the 512 MB Render instance.
+
+**Before anything else, verify the free tier.** Cloudflare R2 was chosen for zero
+egress fees, but neither the current limits nor whether it requires a card on file
+have been checked against Cloudflare's own pricing page.
+`docs/solution/FREE-COMPUTE-NO-CARD.md` exists because that constraint has bitten
+this project before. If R2 needs a card and there isn't one, say so on day one
+rather than after the endpoints are written — the S3 API is the same either way,
+so the fallback is a provider swap and not a redesign.
+
+- [ ] Free tier verified against vendor documentation, with the limits written
+      down and dated
+- [ ] Bucket created, private, with **no public read** on any path
+- [ ] Credentials in Render's environment. **Never in `agent/`, never in the
+      repository.** ADR 0006 is explicit that no storage SDK and no storage
+      credential reaches a provider machine; `httpx` performs a presigned PUT and
+      GET, so `agent/requirements.txt` needs nothing new. A PR touching that file
+      in this work is a signal something went wrong upstream of it.
+- [ ] Key layout that makes a customer's objects unguessable and
+      non-enumerable from a single presigned URL
+- [ ] **Lifecycle rules**, matching what Y12's document decided about retention.
+      Storage costs money monthly and holds customer project files, which
+      `docs/LEGAL-SECURITY-REQUIREMENTS-INDIA.md` gives weight to. This is not a
+      setting for whoever happens to create the bucket to pick.
+- [ ] A local development story. Somebody without the production credentials has
+      to be able to run the stack — say whether that is a second bucket, MinIO in
+      `docker-compose.yml`, or a documented "you cannot".
+
+---
+
 ## Notes
 
 Add a dated line when something changes.
@@ -452,3 +548,4 @@ Add a dated line when something changes.
 |------|------|
 | 2026-08-10 | File created. M0 code complete; Y1 is the blocking item. |
 | 2026-08-16 | Y6–Y11 assigned: provider accounts, the console, and gated agent enrolment, per [ADR 0005](adr/0005-provider-accounts-and-agent-enrolment.md). Y1–Y5 are unchanged and still open; Y0 still gates everything. Y8 is what retires [ADR 0004](adr/0004-m1-unauthenticated-heartbeat.md), which has already expired by its own terms. |
+| 2026-08-18 | **Y0 and Y1 closed as done** (#47, #50). Y1's verification is the quality bar for this file: run from a real clean clone, both failure paths exercised, deviations filed as issues rather than absorbed, and the two things it could *not* verify — GPU-served completion and the Nodes tab — stated plainly instead of implied. The stale `main.py:707` reference in Y7 was corrected to `:741`; PR #45 inserted `signups_open()` above it and shifted the file. **Y12 and Y13 assigned** for the rendering vertical, per [ADR 0006](adr/0006-render-batch-jobs.md) — schema and object storage. They rank below Y6–Y11 deliberately; the exception is verifying R2's free tier, which is small and unblocks other people. |

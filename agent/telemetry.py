@@ -76,11 +76,27 @@ class Node:
 
 
 @dataclass
+class Orchestrator:
+    """Where this node reports, and whether anyone is answering.
+
+    `url` is carried even when `status` is healthy. It is the field that would
+    have made the 2026-08-15 incident a five-second diagnosis instead of an
+    afternoon: the node was reporting into the packaged default,
+    `http://localhost:8080`, and no surface in the app named an address.
+    """
+
+    status: str
+    detail: str
+    url: str
+
+
+@dataclass
 class Telemetry:
     host: Host
     gpu: Gpu | None
     ollama: Ollama
     node: Node
+    orchestrator: Orchestrator
 
     @property
     def rentable(self) -> bool:
@@ -89,6 +105,13 @@ class Telemetry:
         A GPU alone is not enough and a running Ollama alone is not enough.
         The dashboard needs one honest answer to 'can I earn money on this
         box', and computing it here keeps every surface agreeing on it.
+
+        The orchestrator link is deliberately NOT part of this. `rentable` is a
+        claim about the provider's hardware, and folding our own availability
+        into it would tell a provider their machine was unfit during an outage
+        on our side. It would also feed back into the heartbeat, whose
+        `accepts_work` field is `node.accepts_work and rentable`. The link is
+        reported separately and rendered separately.
         """
         return self.gpu is not None and self.ollama.reachable
 
@@ -294,6 +317,11 @@ def snapshot(state: ProviderState, host: str = DEFAULT_HOST) -> Telemetry:
             status=status.value,
             detail=state.detail,
             accepts_work=status.accepts_work,
+        ),
+        orchestrator=Orchestrator(
+            status=state.link.value,
+            detail=state.link_detail,
+            url=state.link_url,
         ),
     )
 

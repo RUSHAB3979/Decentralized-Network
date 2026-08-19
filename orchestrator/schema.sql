@@ -180,6 +180,84 @@ CREATE INDEX IF NOT EXISTS marketplace_api_keys_user_idx
 ALTER TABLE provider_nodes
     ADD COLUMN IF NOT EXISTS node_token_hash TEXT;
 
+-- Whether this account may see the fleet in full detail.
+--
+-- FAIL-CLOSED, the same shape as render_eligible and accepts_work: default
+-- FALSE, and only an operator running an UPDATE changes it. Every row in
+-- provider_nodes is a hardware fingerprint of somebody's actual home computer
+-- -- hostname, OS build, CPU model, driver version -- and until this column
+-- existed, any signed-up customer could read all of it for every provider on
+-- the marketplace. NodeView's own docstring already called itself "the model
+-- that will eventually be filtered for what a customer is allowed to see";
+-- this is the column that filter reads.
+--
+-- What a non-operator still sees is the capacity the marketplace is actually
+-- selling: GPU model, VRAM, liveness, utilisation. What they no longer see is
+-- everything that identifies the machine or the person who owns it.
+--
+-- This is a stand-in for provider accounts (ADR 0005), not a replacement. The
+-- eventual answer is "the account that owns the node", and there is still no
+-- owner column to filter on.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_operator BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Wall-clock the ORCHESTRATOR measured for an inference request, as distinct
+-- from total_duration_ms, which is whatever the provider said.
+--
+-- The provider is untrusted and picks its own numbers. Before this column
+-- those numbers were copied into the request row and summed by /v1/usage, so a
+-- hostile provider could inflate every figure a customer sees about their own
+-- spending. This is the value nobody outside this process can influence:
+-- created_at and completed_at are both written here.
+--
+-- NOT A BILL, and specifically not the fix for metering. Metering is hand-built
+-- under ADR 0002 and agent/core/meter.py still raises NotImplementedError.
+-- What this closes is narrower and worth naming exactly: the provider's report
+-- is no longer the only record of how long the work took, and the reported
+-- figure is clamped against this one before it is stored.
+ALTER TABLE inference_requests
+    ADD COLUMN IF NOT EXISTS orchestrator_duration_ms INTEGER;
+
+-- Make the owner mandatory.
+--
+-- The column was added nullable so that keys minted by the old loopback-only
+-- demo flow would keep working. That kindness had a cost nobody priced:
+-- authentication matches on the key hash alone, while listing and revoking are
+-- scoped to the session's user_id -- so an ownerless key authenticated forever
+-- and was invisible to the only interface that could revoke it. There was no
+-- supported way to turn one off.
+--
+-- Guarded rather than a bare SET NOT NULL. A deployment that still has legacy
+-- rows must not fail to start on a schema statement; it gets the application-
+-- level refusal in _authenticate_api_key() instead, which fails closed for
+-- exactly those rows and leaves this constraint to be applied once they are
+-- cleaned up. This is the first constraint in this file that cannot be
+-- expressed as a plain idempotent ALTER, which is the Alembic threshold
+-- db.py's docstring names -- noted, not crossed.
+-- What the customer said the .blend would weigh, kept separately from
+-- source_bytes, which is what the object actually turned out to weigh.
+--
+-- Two different facts that were being stored in one column. The declared figure
+-- is needed after submission because it is signed into the upload URL -- the
+-- presigned PUT binds Content-Length, so the bucket itself refuses an upload of
+-- any other size, and re-minting that URL later requires remembering the number
+-- it was minted against. Overloading source_bytes would have made "declared"
+-- and "measured" indistinguishable exactly when the difference matters, which
+-- is while investigating an upload that was refused.
+ALTER TABLE render_jobs
+    ADD COLUMN IF NOT EXISTS declared_source_bytes BIGINT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM marketplace_api_keys WHERE user_id IS NULL) THEN
+        BEGIN
+            ALTER TABLE marketplace_api_keys ALTER COLUMN user_id SET NOT NULL;
+        EXCEPTION WHEN others THEN
+            NULL;
+        END;
+    END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- The work queue.
 --
@@ -246,3 +324,190 @@ CREATE INDEX IF NOT EXISTS inference_jobs_claimable_idx
 -- key. This one serves "what happened to request X" during debugging.
 CREATE INDEX IF NOT EXISTS inference_jobs_request_idx
     ON inference_jobs (request_id);
+
+-- ---------------------------------------------------------------------------
+-- RENDERING: the second workload class.
+--
+-- See docs/adr/0006-render-batch-jobs.md. Rendering gets its own tables rather
+-- than a `workload_type` column on inference_jobs, because the two differ in
+-- payload shape, lease window, retry unit and billing unit. One table would
+-- mean every future change to either has to be reasoned about against the
+-- other.
+--
+-- THE GATE, AND WHAT IT IS NOT. A .blend file can carry embedded Python, so
+-- running one is executing a stranger's code on a provider's machine. The
+-- sandbox that would make that safe does not exist; it is hand-built under
+-- ADR 0002 and is docs/ryujitasks.md K7. Until it does, render work is
+-- restricted to nodes whose owner has explicitly opted in, by an UPDATE, one
+-- machine at a time.
+--
+-- This is a column, not a sandbox. It bounds the blast radius to hardware
+-- somebody chose; it does not make the execution safe. Anyone who sets
+-- render_eligible on a machine they do not own has accepted arbitrary code
+-- execution on it, and nothing here will stop them or tell them.
+-- ---------------------------------------------------------------------------
+
+-- Fails closed, exactly as accepts_work has since the first table in this
+-- schema. A provider who installs the app tomorrow cannot receive a render
+-- job -- not because somebody remembered to exclude them, but because the
+-- default excludes them.
+ALTER TABLE provider_nodes
+    ADD COLUMN IF NOT EXISTS render_eligible BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Which Blender the node actually has, as reported by `blender --version`.
+-- Version drift is a silent-failure class: the same .blend rendered on a
+-- different build can produce different pixels and nothing raises. Selection
+-- matches on this, so a mismatch becomes "no node available" -- visible -- and
+-- not "wrong output" -- invisible.
+ALTER TABLE provider_nodes
+    ADD COLUMN IF NOT EXISTS blender_version TEXT;
+
+-- The customer half of the gate. Both sides must be on for any byte to move.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS render_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ---------------------------------------------------------------------------
+-- One row per submission.
+--
+-- ON STATUS, WHICH IS THE ONE SUBTLE THING HERE. This column holds only the
+-- states that are facts about the job itself and are not visible in its
+-- frames: awaiting_upload (no frames exist yet), queued (they do), and
+-- cancelled (a human said stop). Everything else a customer sees -- running,
+-- completed, failed, and the progress count -- is DERIVED from render_frames
+-- at read time and is never written here.
+--
+-- The alternative, a status column maintained by a background task, is the
+-- mistake this schema has now declined four times: liveness (line 11), session
+-- expiry (line 131), inference job reclaim, and this. The reason is the same
+-- every time. A sweeper that dies leaves every job reading "running" forever,
+-- the customer waits for something that finished an hour ago, and nothing
+-- raises.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS render_jobs (
+    job_id             TEXT PRIMARY KEY,
+
+    user_id            TEXT        NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+
+    -- awaiting_upload | queued | cancelled. See the note above: this is not
+    -- the status the customer is shown.
+    status             TEXT        NOT NULL DEFAULT 'awaiting_upload',
+
+    -- Recorded at submission and matched against provider_nodes.blender_version
+    -- at claim time -- on the RELEASE SERIES, not the exact string. A customer
+    -- picks "4.3" because that is how Blender compatibility is described and
+    -- what a scene is authored against; a node reports "4.3.2" because that is
+    -- what `blender --version` prints. Compared for equality those never match
+    -- and every job would sit queued forever with nothing raising. Across
+    -- series it stays strict: 4.2 renders a 4.3 file into a different image,
+    -- exits zero, and reports success.
+    blender_version    TEXT        NOT NULL,
+
+    -- cycles | eevee
+    engine             TEXT        NOT NULL,
+
+    frame_start        INTEGER     NOT NULL,
+    frame_end          INTEGER     NOT NULL,
+
+    -- png | exr. Video muxing needs a step after every frame lands and is not
+    -- built; the submission API rejects mp4 rather than accepting it and
+    -- silently delivering stills.
+    output_format      TEXT        NOT NULL,
+
+    -- Where the .blend lives in the bucket. The orchestrator never holds the
+    -- bytes -- it mints a presigned URL and the browser uploads directly.
+    source_object_key  TEXT        NOT NULL,
+
+    -- Confirmed by a HEAD against the bucket after upload, not trusted from
+    -- the client. A client-reported size is a claim; this is a measurement.
+    source_bytes       BIGINT,
+
+    -- Recorded as the customer's stated ceiling. NOT enforced as money:
+    -- metering is hand-built under ADR 0002 and agent/core/meter.py still
+    -- raises NotImplementedError, so there is no amount to compare it to. It
+    -- is stored now so that the number the customer chose is not lost by the
+    -- time there is.
+    spending_limit_usd NUMERIC(10, 2),
+
+    error_code         TEXT,
+
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    uploaded_at        TIMESTAMPTZ,
+    cancelled_at       TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS render_jobs_user_idx
+    ON render_jobs (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- One row per frame. THIS is the unit of claim, lease and retry.
+--
+-- The unified plan's Phase 3 exit gate requires that "failed frames retry
+-- without restarting the full animation". A 120-frame animation that starts
+-- over because frame 87 died is not a product, and per-frame rows are what
+-- make the alternative possible.
+--
+-- Unlike inference_jobs, no node is chosen at enqueue time. Frames sit
+-- unassigned and any eligible node claims the oldest one. Inference pre-selects
+-- because the model has to already be resident on that machine; a frame has no
+-- such affinity, so pre-assigning it would idle every other node whenever one
+-- node's queue was long.
+--
+-- HAND-BUILT SEAM, unchanged from inference_jobs: the lease semantics here are
+-- the minimum needed to move a frame to a machine and back. Renewal, drain and
+-- crash reconciliation belong to agent/core/lease.py, which is hand-built under
+-- ADR 0002 and still raises NotImplementedError. That absence costs more here
+-- than it did for inference -- a lapsed lease on a chat request wastes seconds,
+-- and on a frame twenty minutes into a render it wastes twenty minutes of a
+-- provider's GPU and hands the same work to somebody else.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS render_frames (
+    frame_id          TEXT PRIMARY KEY,
+
+    job_id            TEXT        NOT NULL REFERENCES render_jobs(job_id) ON DELETE CASCADE,
+
+    frame_number      INTEGER     NOT NULL,
+
+    -- queued | claimed | completed | failed
+    status            TEXT        NOT NULL DEFAULT 'queued',
+
+    -- Which node holds it. Not a foreign key, for the same reason
+    -- inference_jobs.node_id is not one: a node that deregisters mid-flight
+    -- must not delete the record of work it was given.
+    node_id           TEXT,
+
+    claimed_at        TIMESTAMPTZ,
+    lease_expires_at  TIMESTAMPTZ,
+
+    -- Incremented on every claim, including reclaims after a lapsed lease.
+    -- BOUNDED at claim time: without a ceiling, a frame that crashes the
+    -- runtime is handed out forever, and a job containing one poisonous frame
+    -- becomes an unbounded bill against every provider in the fleet in turn.
+    attempts          INTEGER     NOT NULL DEFAULT 0,
+
+    output_object_key TEXT,
+    output_bytes      BIGINT,
+
+    -- Wall-clock the runtime reported. Evidence, NOT a bill -- same wording and
+    -- same reason as inference_jobs' token counts.
+    render_seconds    NUMERIC(10, 3),
+
+    error_code        TEXT,
+
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at      TIMESTAMPTZ,
+
+    -- A job must never contain the same frame twice. This is also what makes
+    -- fan-out idempotent: a retried /uploaded call cannot double the queue.
+    UNIQUE (job_id, frame_number)
+);
+
+-- The claim query filters on status and lease and orders by age, across all
+-- jobs. This index matches that; without it every claim scans every frame ever
+-- rendered, which is fine at a hundred rows and not at a hundred thousand.
+CREATE INDEX IF NOT EXISTS render_frames_claimable_idx
+    ON render_frames (status, lease_expires_at, created_at);
+
+-- "Show me this job's progress" is the single most frequent read on this table,
+-- because every open browser tab polls it.
+CREATE INDEX IF NOT EXISTS render_frames_job_idx
+    ON render_frames (job_id, frame_number);

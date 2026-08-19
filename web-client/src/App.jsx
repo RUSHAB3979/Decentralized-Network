@@ -12,6 +12,8 @@ import AuthPage from './components/AuthPage';
 import AppShell from './components/app/AppShell';
 import MarketplaceDashboard from './components/app/MarketplaceDashboard';
 import RenderJobPage from './components/app/RenderJobPage';
+import RenderJobsPage from './components/app/RenderJobsPage';
+import RenderJobDetailPage from './components/app/RenderJobDetailPage';
 import ModelApiPage from './components/app/ModelApiPage';
 import WorkstationPage from './components/app/WorkstationPage';
 import GamingPage from './components/app/GamingPage';
@@ -87,6 +89,11 @@ const App = () => {
 
         let page = <MarketplaceDashboard onNavigate={navigate}/>;
         if (route === '/app/render') page = <RenderJobPage onNavigate={navigate}/>;
+        if (route === '/app/render/jobs') page = <RenderJobsPage onNavigate={navigate}/>;
+        if (route.startsWith('/app/render/jobs/')) {
+            const jobId = route.slice('/app/render/jobs/'.length);
+            page = <RenderJobDetailPage jobId={jobId} onNavigate={navigate}/>;
+        }
         if (route === '/app/models') page = <ModelApiPage onNavigate={navigate}/>;
         if (route === '/app/workstations') page = <WorkstationPage onNavigate={navigate}/>;
         if (route === '/app/gaming') page = <GamingPage onNavigate={navigate}/>;

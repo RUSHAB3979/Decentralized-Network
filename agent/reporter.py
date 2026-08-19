@@ -17,6 +17,12 @@ this node -- restored backup, wiped development database -- heartbeating into
 it would succeed forever while the fleet appeared empty. Treating 404 as "go
 register again" makes that self-healing.
 
+*A 401 is a re-registration too, but a destructive one.* The heartbeat carries
+the node credential, so the orchestrator can tell this node from anyone who
+learned its id. When the credential is refused, the local copy is deleted
+before re-registering: keeping it would make every subsequent heartbeat fail
+identically, forever, with the fix sitting unused on disk.
+
 *Every request has an explicit timeout, and it is larger than the server's.*
 The orchestrator's database connect timeout is 5 seconds, so a slow-but-honest
 response can legitimately take longer than that. A client timeout below the
@@ -32,7 +38,8 @@ import threading
 import httpx
 
 from agent import __version__, identity
-from agent.state import ProviderState
+from agent.runtime import blender
+from agent.state import Link, ProviderState
 from agent.telemetry import Telemetry, snapshot
 
 DEFAULT_ORCHESTRATOR = "http://localhost:8080"
@@ -100,6 +107,14 @@ def metrics_payload(telemetry: Telemetry) -> dict:
         "ollama_reachable": ollama.reachable,
         "ollama_version": ollama.version,
         "local_models": [m.name for m in ollama.available if not m.remote][:200],
+        # A capability, not a permission. Saying "this machine has Blender 4.3.2"
+        # does not make it eligible to render: that is provider_nodes
+        # .render_eligible, which defaults FALSE and is only ever set by an
+        # operator. Rendering a stranger's .blend means executing code we did
+        # not write on hardware we do not own, and the sandbox that would
+        # contain it is still an unwritten hand-built task -- so the decision
+        # belongs to the machine's owner, not to its software's self-report.
+        "blender_version": blender.installed_version(),
     }
 
 
@@ -116,10 +131,55 @@ class Reporter:
         # log can distinguish "never reached the orchestrator" from "reached
         # it and then lost it". Those need different debugging.
         self.ever_connected = False
+        # Publish the address before the first request rather than after it.
+        # Until this line existed, the only record of where a node reported was
+        # a print() into a console that the packaged build does not create
+        # (`console=False` in packaging/GPUProvider.spec), so a provider had no
+        # way to discover they were heartbeating into the localhost default.
+        self.state.set_link(
+            Link.CONNECTING, self.base_url, "contacting the orchestrator"
+        )
 
-    def _post(self, client: httpx.Client, path: str, payload: dict) -> httpx.Response:
+    def _post(
+        self,
+        client: httpx.Client,
+        path: str,
+        payload: dict,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         return client.post(
-            f"{self.base_url}{path}", json=payload, timeout=REQUEST_TIMEOUT_S
+            f"{self.base_url}{path}",
+            json=payload,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT_S,
+        )
+
+    def _auth_header(self) -> dict[str, str] | None:
+        """Bearer credential for authenticated node endpoints, or None.
+
+        Read from disk on each use, for the same reason `agent/worker.py` does:
+        registration rewrites the token file, and a copy cached in memory at
+        construction would be stale from the moment the node re-registers.
+        """
+        token = identity.node_token()
+        return {"Authorization": f"Bearer {token}"} if token else None
+
+    def _online(self, detail: str) -> None:
+        self.state.set_link(Link.ONLINE, self.base_url, detail)
+
+    def record_failure(self, detail: str) -> None:
+        """Publish a failed exchange, preserving why it failed.
+
+        `ever_connected` is what separates the two cases, and the separation is
+        the useful part: a node that has never got through is almost always
+        pointed at the wrong address, while one that connected and stopped has
+        a network problem or is waiting out an outage. The provider does
+        different things about each.
+        """
+        self.state.set_link(
+            Link.OFFLINE if self.ever_connected else Link.CONNECTING,
+            self.base_url,
+            detail,
         )
 
     def register(self, client: httpx.Client, telemetry: Telemetry) -> bool:
@@ -137,6 +197,11 @@ class Reporter:
             # cannot fix it and the body names the offending field, so say so
             # loudly rather than looping silently on a permanent error.
             print(f"[reporter] registration rejected as invalid: {response.text}")
+            # Reachable but refusing us, which leaves the node absent from the
+            # marketplace just as surely as an outage would. Reported as a
+            # failure so the dashboard does not show a healthy link for a node
+            # that will never appear in the registry.
+            self.record_failure("the orchestrator rejected this node's details")
             return False
         response.raise_for_status()
         body = response.json()
@@ -155,6 +220,7 @@ class Reporter:
                     "this machine will not be offered work"
                 )
         self.registered = True
+        self._online("registered")
         print(
             f"[reporter] registered {self.node_id} with {self.base_url} "
             f"(heartbeat every {self.interval_s:.0f}s)"
@@ -163,6 +229,17 @@ class Reporter:
 
     def heartbeat(self, client: httpx.Client, telemetry: Telemetry) -> bool:
         node = telemetry.node
+        headers = self._auth_header()
+        if headers is None:
+            # The heartbeat is authenticated, so a node with no stored
+            # credential cannot heartbeat at all -- and it also cannot be given
+            # work, because agent/worker.py refuses to claim without one. Going
+            # back through registration is the only path that produces a token,
+            # and it is the same self-healing route a 401 takes.
+            print("[reporter] no node credential on disk; registering again")
+            self.registered = False
+            self.record_failure("this node has no credential; registering again")
+            return False
         response = self._post(
             client,
             "/providers/heartbeat",
@@ -176,16 +253,36 @@ class Reporter:
                 "accepts_work": node.accepts_work and telemetry.rentable,
                 "metrics": metrics_payload(telemetry),
             },
+            headers=headers,
         )
         self.ever_connected = True
+        if response.status_code == 401:
+            # The orchestrator has a row for this node but not this token: the
+            # node re-registered from another install, or the database was
+            # restored from a backup taken before this credential was issued.
+            # Discarding the local copy is what makes the next registration mint
+            # a fresh one; keeping it would 401 forever with no visible cause.
+            # Same handling as agent/worker.py's claim path, deliberately -- a
+            # credential that is dead for one endpoint is dead for both.
+            print("[reporter] node credential rejected; discarding it to re-register")
+            identity.clear_node_token()
+            self.registered = False
+            return False
         if response.status_code == 404:
             print("[reporter] orchestrator does not know this node; re-registering")
             self.registered = False
+            # The link is left exactly as it was on purpose. The server
+            # answered, so contact is healthy; this is the self-healing
+            # re-registration path and the next loop iteration fixes it. Marking
+            # it offline here would flicker the dashboard once per wiped
+            # database for no reason a provider could act on.
             return False
         if response.status_code == 422:
             print(f"[reporter] heartbeat rejected as invalid: {response.text}")
+            self.record_failure("the orchestrator rejected this node's heartbeat")
             return False
         response.raise_for_status()
+        self._online("heartbeat accepted")
         return True
 
 
@@ -217,6 +314,11 @@ def run(state: ProviderState, stop: threading.Event, base_url: str | None = None
                     f"[reporter] {where} {reporter.base_url}: "
                     f"{exc.__class__.__name__}: {exc}"
                 )
+                # Same information, on a surface the provider actually has. The
+                # print above goes to a console the packaged build never
+                # creates, which is why this failure could run for hours
+                # looking like success.
+                reporter.record_failure(f"{exc.__class__.__name__}: {exc}")
 
             if ok:
                 backoff = reporter.interval_s

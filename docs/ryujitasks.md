@@ -17,6 +17,11 @@ Task IDs use `K` so they do not collide with the role IDs (R1–R10).
 **blocked on the founder's explicit go-ahead** — do not begin any part of it
 until he says so in writing.
 
+**K6 and K7 were added on 2026-08-18** and are the newest security work on the
+critical path: the marketplace is starting a Blender rendering vertical, which
+puts untrusted files on provider hardware. Do K2 before K6 — K6 is the concrete
+instance of the T-04 category K2 models, and it reads better second.
+
 ---
 
 ## Read this first
@@ -244,6 +249,76 @@ dashboard and have completely different first moves.
 
 ---
 
+## K6 — Threat model: the untrusted `.blend` · `pending`
+
+This is T-04 stopped being hypothetical. [ADR 0006](adr/0006-render-batch-jobs.md)
+starts a Blender rendering vertical, and a `.blend` file can carry embedded
+Python. K2 models T-04 as a category; this models the one instance of it that is
+about to have code written against it.
+
+Read ADR 0006 first, particularly decision 2. **The gate it describes is a column,
+not a control.** `render_eligible` defaults to `FALSE` so that only the founder's
+own machine runs renders during the pilot. Your job is to establish what has to be
+true before that column can ever be set on a machine we do not own.
+
+- [ ] **Embedded scripts.** `--disable-autoexec` is what the agent will pass.
+      Establish what it actually covers and what it does not — drivers, node
+      groups, app handlers, and anything else that executes without being an
+      auto-run script. Say whether the flag is a control or a speed bump.
+- [ ] **Path traversal on output.** The render writes files. A scene that
+      controls its own output path controls where those bytes land on the
+      provider's disk.
+- [ ] **Resource exhaustion.** A scene can request more memory than the machine
+      has, or run effectively forever. Both look like a slow render, and the
+      provider's PC becomes unusable while it happens.
+- [ ] **Egress.** The unified plan requires default-deny networking (§3.1). The
+      pilot has none. State what a render process can reach today on a normal
+      Windows machine, including the local network behind the provider's router.
+- [ ] **Oversized artifacts.** Output size is attacker-controlled. Say what
+      bounds it, and what happens to the provider's disk if nothing does.
+- [ ] **What is not mitigated**, stated explicitly, as in K2.
+
+Deliver as `docs/risk/threat-model-untrusted-blend.md`.
+
+---
+
+## K7 — Sandbox design — the document that retires the gate · `pending`
+
+ADR 0006's expiry condition is this task. Until a sandbox exists, rendering is
+restricted to one machine by a boolean, and the marketplace has one supplier.
+
+The unified plan states the requirement (§3.1): *"it must execute only inside a
+disposable sandbox with default-deny networking."* K2 lists gVisor and Firecracker
+as register controls. **Both assume Linux.** The providers this marketplace is
+built to aggregate run consumer Windows — that is ADR 0003's whole premise — so
+the register's answer and the actual hardware do not currently meet.
+
+Compare, on the hardware we actually have:
+
+- [ ] **Windows Sandbox** — present on Windows Pro and above, absent on Home.
+      Establish whether GPU access works, because a sandbox with no GPU renders
+      nothing. Rushab's own machine runs Windows 11 Home Single Language; if that
+      excludes it, the pilot machine cannot run the sandbox it is meant to prove.
+- [ ] **Containers with GPU passthrough** — requires WSL2 or Hyper-V. Say what
+      that asks of a provider who just wanted to install an app, and whether
+      NVIDIA passthrough into WSL2 is dependable on consumer drivers.
+- [ ] **A full VM** — heaviest, most isolated. Say what it costs in setup and in
+      render throughput.
+- [ ] **Cleanup verification.** Not "we delete the folder" — how do we *know* it
+      is gone, and what happens when the machine is put to sleep mid-render and
+      resumed three days later. Provider PCs are gaming PCs; this is the normal
+      case, not the edge case.
+- [ ] A recommendation, with the honest answer about what fraction of consumer
+      Windows machines can actually run it. **If the answer is "most providers
+      cannot", that is the finding** — it is better delivered now than after the
+      agent has been built against an assumption.
+
+Deliver as `docs/security/render-sandbox-design.md`.
+
+This does not block the pilot. It blocks the pilot ending.
+
+---
+
 ## Notes
 
 Add a dated line when something changes.
@@ -251,3 +326,4 @@ Add a dated line when something changes.
 | Date | Note |
 |------|------|
 | 2026-08-10 | File created. K1 blocked pending founder go-ahead — not yet given. Recorded that gitleaks passes clean on a history containing blob `05996365`. |
+| 2026-08-18 | **K6 and K7 assigned**, per [ADR 0006](adr/0006-render-batch-jobs.md). The marketplace is adding Blender rendering, which means untrusted files executing on provider hardware — T-04 with a date on it. K6 models the specific case; K7 designs the sandbox, and ADR 0006's expiry condition *is* K7. Neither blocks the pilot: rendering is gated to one machine by a column defaulting to `FALSE`. Both block that gate ever opening. Worth flagging early if K7 concludes that consumer Windows cannot host a real sandbox — that finding changes the product, and it is cheaper now than after the agent is built. |

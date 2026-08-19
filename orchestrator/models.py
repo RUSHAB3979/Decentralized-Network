@@ -24,14 +24,25 @@ precisely because Pydantic turns that class of silent corruption into a loud
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 # Lowercase hex/alphanumeric with dashes. The agent derives this from stable
 # machine facts (see agent/identity.py); the pattern exists so a malformed or
 # injected id is rejected at the edge rather than becoming a primary key.
 NODE_ID = Field(pattern=r"^[a-z0-9][a-z0-9-]{7,63}$")
+
+# One Ollama model name, e.g. `llama3.1:8b`. Bounded per item, which
+# `list[str]` is not: a `max_length` on the list caps how MANY names arrive and
+# says nothing about how long each one is, so a caller could send two hundred
+# strings of two hundred thousand characters each and every one of them would
+# be stored. The list bound and the item bound are different limits and both
+# have to be written down.
+#
+# 200 characters is far above any real name -- the longest in Ollama's library
+# is under forty -- and far below anything that makes a row expensive.
+MODEL_NAME = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
 class Strict(BaseModel):
@@ -80,7 +91,19 @@ class Metrics(Strict):
     # entries out before sending: those are pointers to ollama.com, not local
     # weights, and a node that advertised them would be offering capacity it
     # does not have. The cap is a payload bound, not a product limit.
-    local_models: list[str] = Field(default_factory=list, max_length=200)
+    local_models: list[MODEL_NAME] = Field(default_factory=list, max_length=200)
+
+    # The Blender the agent found on this machine, e.g. "4.3.2", or None when
+    # there is none. A CAPABILITY REPORT, NOT A PERMISSION: a node saying it has
+    # Blender does not make it eligible to render. That is provider_nodes
+    # .render_eligible, which defaults FALSE and is only ever set by an
+    # operator, because agreeing to execute a stranger's file is a decision the
+    # machine's owner makes and not one its software announces.
+    #
+    # None on every heartbeat from an agent build that predates rendering, which
+    # correctly leaves those nodes unmatched rather than guessing a version for
+    # them.
+    blender_version: str | None = Field(default=None, max_length=32)
 
 
 class RegisterRequest(Strict):
@@ -395,4 +418,273 @@ class JobResultRequest(Strict):
 
 class JobResultAccepted(BaseModel):
     job_id: str
+    status: str
+
+
+# ---------------------------------------------------------------------------
+# RENDERING.
+#
+# See docs/adr/0006-render-batch-jobs.md. The shape differs from inference in
+# one way that drives everything below: the payload is a file, so no request or
+# response here ever carries the bytes. They carry presigned URLs, and the
+# bytes travel browser -> storage and storage -> provider without passing
+# through this process.
+#
+# The bounds are load-bearing for the same reason they are on Capability and
+# Metrics. A frame range is arithmetic a customer controls; without a ceiling,
+# `frame_start=1, frame_end=9999999` is a single accepted request that inserts
+# ten million rows and hands the fleet a year of work. Pydantic turning that
+# into a 422 at the edge is the whole argument for generating this file.
+# ---------------------------------------------------------------------------
+
+# The most frames one submission may contain. A ceiling has to exist; this one
+# is chosen to be comfortably above a real animation (a 10-second shot at 24fps
+# is 240) and far below anything that would fill the queue for weeks.
+MAX_FRAMES_PER_JOB = 2_000
+
+# Largest .blend we will mint an upload URL for. Enforced twice: here, against
+# the size the client claims, and again by a HEAD against the bucket after the
+# upload, against the size the object actually is. The first is a courtesy that
+# fails fast; only the second is evidence.
+MAX_SOURCE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+# How many bytes of source one job may cause to be moved across the network in
+# total, counting every frame's download.
+#
+# WHY THIS IS NOT JUST MAX_SOURCE_BYTES. A provider downloads the whole .blend
+# once per frame, so a job's real transfer cost is source_bytes multiplied by
+# frame count -- and the two existing limits multiply out to 2 GiB x 2,000
+# frames, about four terabytes, from a single submission by a single customer.
+# Neither limit is wrong on its own; the product of them is what nobody
+# bounded. This is the missing third constraint, checked at confirmation time
+# when the true source size is finally known.
+#
+# 256 GiB is roughly a 128 MiB scene rendered as a 2,000-frame animation, or a
+# 2 GiB scene at 128 frames. Both are real jobs. What it excludes is the shape
+# that is only ever an attack: the largest possible file times the largest
+# possible frame count.
+MAX_JOB_TRANSFER_BYTES = 256 * 1024 * 1024 * 1024  # 256 GiB
+
+# Bounds on a rendered frame, checked by HEAD after the provider reports
+# success. Zero is the one that matters: an empty object is what a provider
+# gets by uploading nothing at all, and without a floor it counts as a finished
+# frame, completes the job, and is offered to the customer as their render.
+MIN_OUTPUT_BYTES = 1
+MAX_OUTPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+# The first bytes of a real file in each format we accept, used to check that
+# what the provider uploaded is the KIND of thing it claimed to produce.
+#
+# This is a shape check and not an integrity check, and the difference is worth
+# being exact about. It stops a provider handing back a text file, a truncated
+# upload, or an HTML error page and having it delivered to the customer as a
+# rendered image. It does NOT prove the pixels came from the customer's scene:
+# a provider can render anything at all, or send a valid PNG of something else,
+# and these eight bytes will not notice. Proving the output corresponds to the
+# input needs the sandbox and attestation that ADR 0002 reserves. What this
+# closes is the cheapest version of the attack -- upload garbage, get paid --
+# and it closes it completely.
+OUTPUT_MAGIC: dict[str, tuple[bytes, ...]] = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    # OpenEXR's magic number, 20000630 little-endian. Both orderings are listed
+    # because the specification fixes the value and not the file's endianness.
+    "exr": (b"\x76\x2f\x31\x01", b"\x01\x31\x2f\x76"),
+}
+
+# How many bytes to fetch to perform that check. The longest magic above is
+# eight; sixteen is fetched so a format added later does not silently start
+# comparing against a short read.
+OUTPUT_MAGIC_BYTES = 16
+
+# `4.3`, `4.2.1`. Matched against provider_nodes.blender_version at claim time,
+# so a value no node has simply means no node claims it.
+BLENDER_VERSION = Field(pattern=r"^\d{1,2}\.\d{1,2}(\.\d{1,2})?$")
+
+
+class RenderJobCreateRequest(Strict):
+    """A submission. Returns an upload URL; it does not carry the file."""
+
+    blender_version: str = BLENDER_VERSION
+
+    # Cycles is path-traced and GPU-bound; EEVEE is rasterised and much faster.
+    # Both are Blender built-ins, so neither needs anything installed beyond
+    # Blender itself.
+    engine: Literal["cycles", "eevee"]
+
+    # Blender's own frame numbering. Zero is legal; negatives are not.
+    frame_start: int = Field(ge=0, le=1_048_574)
+    frame_end: int = Field(ge=0, le=1_048_574)
+
+    # No mp4. Muxing frames into a video is a step that runs after every frame
+    # lands, and nothing performs it. Accepting the format and delivering
+    # stills would be the silent kind of wrong; rejecting it is the loud kind.
+    output_format: Literal["png", "exr"]
+
+    # What the client says it is about to upload, used to refuse an obviously
+    # oversized job before a URL is minted. Verified after the fact.
+    source_bytes: int = Field(ge=1, le=MAX_SOURCE_BYTES)
+
+    # The customer's stated ceiling. Recorded, not enforced -- there is no
+    # metering to enforce it against. See render_jobs.spending_limit_usd.
+    spending_limit_usd: float | None = Field(default=None, ge=0, le=100_000)
+
+    @field_validator("frame_end")
+    @classmethod
+    def _range_is_sane(cls, value: int, info):
+        start = info.data.get("frame_start")
+        if start is None:
+            # frame_start already failed its own validation; reporting a second
+            # error about a field we could not read would just be noise.
+            return value
+        if value < start:
+            raise ValueError("frame_end must not be less than frame_start")
+        if value - start + 1 > MAX_FRAMES_PER_JOB:
+            raise ValueError(
+                f"a job may contain at most {MAX_FRAMES_PER_JOB} frames; "
+                f"this range is {value - start + 1}"
+            )
+        return value
+
+
+class RenderJobCreated(BaseModel):
+    """Where to PUT the file, and for how long that is possible.
+
+    `upload_expires_at` is returned rather than left implicit because a large
+    upload over a domestic connection can outlive a short-lived URL. A client
+    that knows the deadline can warn or re-request; a client that does not
+    discovers it as an opaque 403 at ninety percent.
+    """
+
+    job_id: str
+    status: str
+    frame_count: int
+    upload_url: str
+    upload_expires_at: datetime
+
+
+class RenderFrameView(BaseModel):
+    """One frame's state, as the customer sees it."""
+
+    frame_number: int
+    status: str
+    attempts: int
+    render_seconds: float | None = None
+    error_code: str | None = None
+    completed_at: datetime | None = None
+
+
+class RenderJobView(BaseModel):
+    """A job's state.
+
+    `status` here is DERIVED from the frames on every read and is not the
+    column of the same name in render_jobs -- see the comment above the table.
+    The counts are returned alongside it because "running" on its own tells a
+    customer nothing about whether to keep the tab open.
+    """
+
+    job_id: str
+    status: str
+    blender_version: str
+    engine: str
+    frame_start: int
+    frame_end: int
+    output_format: str
+    frame_count: int
+    frames_completed: int
+    frames_failed: int
+    frames_running: int
+    spending_limit_usd: float | None = None
+    source_bytes: int | None = None
+    error_code: str | None = None
+    created_at: datetime
+    uploaded_at: datetime | None = None
+
+    # Populated on the detail view only. A list endpoint returning every frame
+    # of every job would be a megabyte of JSON to render a progress bar.
+    frames: list[RenderFrameView] | None = None
+
+
+class RenderJobList(BaseModel):
+    jobs: list[RenderJobView]
+
+
+class RenderArtifact(BaseModel):
+    """One finished frame, and a short-lived URL to fetch it with."""
+
+    frame_number: int
+    url: str
+    bytes: int | None = None
+
+
+class RenderArtifactList(BaseModel):
+    job_id: str
+    artifacts: list[RenderArtifact]
+    expires_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# The provider half.
+# ---------------------------------------------------------------------------
+
+
+class RenderFrameOffer(BaseModel):
+    """One claimed frame, handed to exactly one agent.
+
+    Both URLs are presigned, single-object, and expire inside the lease. That
+    is the whole of the provider's access to storage: it can read this one
+    .blend and write this one output. It cannot list the bucket, read another
+    customer's project, or overwrite a frame that is already finished.
+
+    No storage credential appears here, and none is ever sent to an agent.
+    A credential that never reaches a machine cannot leak from it.
+    """
+
+    frame_id: str
+    job_id: str
+    frame_number: int
+
+    blender_version: str
+    engine: str
+    output_format: str
+
+    source_url: str
+    output_url: str
+
+    lease_expires_at: datetime
+
+
+class RenderClaimResponse(BaseModel):
+    """Either a frame, or nothing to do. Same shape as JobClaimResponse."""
+
+    frame: RenderFrameOffer | None = None
+    poll_interval_s: int
+
+
+class RenderResultRequest(Strict):
+    """The agent reporting what happened to one frame. Terminal either way."""
+
+    # 'completed' or 'failed'. Not a Literal, for the same reason
+    # JobResultRequest.status is not one: an agent build newer than this
+    # orchestrator must have its report recorded rather than rejected, or the
+    # frame sits until its lease lapses and the work is simply done again.
+    status: str = Field(min_length=1, max_length=32)
+
+    # What the agent uploaded, as it measured it. Cross-checked against the
+    # object in the bucket before the frame is accepted as completed -- an
+    # agent that reports success without uploading anything is the failure this
+    # check exists for, and it is not hypothetical: a crash between render and
+    # upload produces exactly that report.
+    output_bytes: int | None = Field(default=None, ge=0)
+
+    # Wall-clock, as measured by the agent. EVIDENCE, NOT A BILL. Turning this
+    # into an amount owed is metering, hand-built under ADR 0002, and
+    # agent/core/meter.py still raises NotImplementedError. Nothing downstream
+    # should read this as settled.
+    render_seconds: float | None = Field(default=None, ge=0, le=86_400)
+
+    error_code: str | None = Field(default=None, max_length=64)
+
+
+class RenderResultAccepted(BaseModel):
+    frame_id: str
     status: str

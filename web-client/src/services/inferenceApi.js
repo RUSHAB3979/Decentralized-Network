@@ -15,9 +15,20 @@ import { ORCHESTRATOR_URL } from './api';
 import { AuthError, storedToken } from './authApi';
 
 export const INFERENCE_BASE_URL = `${ORCHESTRATOR_URL}/v1`;
+export const CHAT_COMPLETION_TIMEOUT_MS = 135_000;
 
-async function apiRequest(path, { apiKey, useSession = false, ...options } = {}) {
+async function apiRequest(path, {
+  apiKey,
+  useSession = false,
+  timeoutMs,
+  timeoutMessage,
+  ...options
+} = {}) {
   const headers = new Headers(options.headers ?? {});
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeout = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
 
   if (apiKey) {
     headers.set('Authorization', `Bearer ${apiKey}`);
@@ -34,10 +45,33 @@ async function apiRequest(path, { apiKey, useSession = false, ...options } = {})
     headers.set('Content-Type', 'application/json');
   }
 
-  let response;
   try {
-    response = await fetch(`${INFERENCE_BASE_URL}${path}`, { ...options, headers });
+    const response = await fetch(`${INFERENCE_BASE_URL}${path}`, {
+      ...options,
+      headers,
+      signal: controller?.signal ?? options.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      // Carry the status through as AuthError so callers can tell a dead session
+      // (401) from no capacity (503) from a missing model (404) without reading
+      // the message. The gateway returns all three in normal operation and they
+      // need three different responses from the UI.
+      throw new AuthError(detail(body, response.status), response.status);
+    }
+
+    if (response.status === 204) return null;
+    return await response.json();
   } catch (cause) {
+    if (cause instanceof AuthError) throw cause;
+    if (controller?.signal.aborted || cause?.name === 'AbortError') {
+      throw new AuthError(
+        timeoutMessage ?? `No response from the orchestrator within ${timeoutMs}ms.`,
+        0,
+        { cause },
+      );
+    }
     // Same three indistinguishable causes as authApi.js -- see the note there.
     throw new AuthError(
       `Cannot reach the orchestrator at ${INFERENCE_BASE_URL}. It may still be `
@@ -45,19 +79,9 @@ async function apiRequest(path, { apiKey, useSession = false, ...options } = {})
       0,
       { cause },
     );
+  } finally {
+    if (timeout !== null) window.clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    // Carry the status through as AuthError so callers can tell a dead session
-    // (401) from no capacity (503) from a missing model (404) without reading
-    // the message. The gateway returns all three in normal operation and they
-    // need three different responses from the UI.
-    throw new AuthError(detail(body, response.status), response.status);
-  }
-
-  if (response.status === 204) return null;
-  return response.json();
 }
 
 function detail(body, status) {
@@ -102,10 +126,18 @@ export function fetchInferenceUsage(apiKey) {
   return apiRequest('/usage', { apiKey });
 }
 
-export function createChatCompletion(apiKey, payload) {
+export function createChatCompletion(
+  apiKey,
+  payload,
+  { timeoutMs = CHAT_COMPLETION_TIMEOUT_MS } = {},
+) {
   return apiRequest('/chat/completions', {
     apiKey,
     method: 'POST',
     body: JSON.stringify(payload),
+    timeoutMs,
+    timeoutMessage:
+      'The provider did not return a result before the request deadline. '
+      + 'Check that exactly one provider agent is online, then retry.',
   });
 }

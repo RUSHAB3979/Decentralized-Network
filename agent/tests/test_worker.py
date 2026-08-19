@@ -15,6 +15,7 @@ providers has to delete an assertion to do it.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -80,7 +81,9 @@ def test_run_sends_the_job_to_the_local_runtime():
         captured["body"] = json.loads(request.content)
         return _ollama_response(request)
 
-    w = worker.Worker(ProviderState(), _FakeSupervisor(), base_url="http://orch.invalid")
+    w = worker.Worker(
+        ProviderState(), _FakeSupervisor(), base_url="http://orch.invalid"
+    )
     with httpx.Client(transport=httpx.MockTransport(handler)) as runtime:
         result = w.run(_job(), runtime=runtime)
 
@@ -176,6 +179,32 @@ def test_a_reassigned_job_is_not_retried(monkeypatch):
         w.report(client, "job_abc", {"status": "completed", "content": "x"})
 
 
+def test_a_reassigned_frame_result_is_dropped_not_retried(monkeypatch):
+    # A conflict is an ownership answer, not a transient transport failure.
+    # Retrying cannot make the lease belong to this node again.
+    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(409, json={"detail": "frame is not claimed by this node"})
+
+    w = worker.Worker(ProviderState(), _FakeSupervisor())
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        w.report_render(
+            client,
+            "frame_abc",
+            {
+                "status": "completed",
+                "output_bytes": 15,
+                "render_seconds": 2.5,
+                "error_code": None,
+            },
+        )
+
+    assert len(calls) == 1
+
+
 def test_a_failed_run_still_produces_a_reportable_result():
     # The loop converts an exception into a 'failed' body rather than dropping
     # it. A job that is never reported sits claimed until its lease lapses, and
@@ -204,6 +233,10 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
     test rather than a comment.
     """
     monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    # This regression is specifically about the inference-only empty cycle.
+    # Pinning discovery keeps it independent of whether a CI host happens to
+    # have Blender installed.
+    monkeypatch.setattr(worker.blender, "find_binary", lambda: None)
 
     calls = {"claims": 0}
 
@@ -232,7 +265,10 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
     monkeypatch.setattr(httpx, "Client", client_factory)
 
     worker.run(
-        ProviderState(), _FakeSupervisor(), accepting, RecordingStop(),
+        ProviderState(),
+        _FakeSupervisor(),
+        accepting,
+        RecordingStop(),
         base_url="http://orch.invalid",
     )
 
@@ -240,3 +276,134 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
     # And it waited for the interval the *server* asked for, not a local
     # constant -- that is what lets the fleet be re-paced without a new build.
     assert waits == [7.0], f"expected a 7s wait from poll_interval_s, got {waits}"
+
+
+def test_machine_without_blender_never_calls_the_render_claim_endpoint(monkeypatch):
+    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr(worker.blender, "find_binary", lambda: None)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"frame": None, "poll_interval_s": 3})
+
+    w = worker.Worker(ProviderState(), _FakeSupervisor())
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert w.claim_render(client) is None
+    assert calls == []
+
+
+def test_no_output_render_is_reported_as_failed(monkeypatch):
+    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr(worker.blender, "find_binary", lambda: Path("blender.exe"))
+    monkeypatch.setattr(worker.blender, "detect_version", lambda binary: "4.3.2")
+
+    stop = threading.Event()
+    reports = []
+
+    frame = {
+        "frame_id": "frame_abc",
+        "job_id": "render_abc",
+        "frame_number": 12,
+        "blender_version": "4.3",
+        "engine": "cycles",
+        "output_format": "png",
+        "source_url": "https://storage.invalid/source.blend",
+        "output_url": "https://storage.invalid/frame.png",
+        "lease_expires_at": "2026-08-18T10:00:00Z",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/providers/work/claim":
+            return httpx.Response(200, json={"job": None, "poll_interval_s": 5})
+        if request.url.path == "/providers/render/claim":
+            return httpx.Response(200, json={"frame": frame, "poll_interval_s": 5})
+        if request.url.path.endswith("/frames/frame_abc/result"):
+            import json
+
+            reports.append(json.loads(request.content))
+            stop.set()
+            return httpx.Response(200)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    def no_output(self, claimed):
+        raise worker.blender.BlenderError("Blender produced no output for frame 12")
+
+    monkeypatch.setattr(worker.Worker, "run_render", no_output)
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        worker.httpx,
+        "Client",
+        lambda *args, **kwargs: real_client(transport=transport),
+    )
+
+    accepting = threading.Event()
+    accepting.set()
+    worker.run(
+        ProviderState(),
+        _FakeSupervisor(),
+        accepting,
+        stop,
+        base_url="http://orch.invalid",
+    )
+
+    assert len(reports) == 1
+    assert reports[0]["status"] == "failed"
+    assert reports[0]["output_bytes"] == 0
+    assert reports[0]["error_code"] == "BlenderError"
+
+
+def test_inference_claim_prevents_a_second_render_claim(monkeypatch):
+    """A server offering both kinds of work must still transfer one lease."""
+    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr(worker.blender, "find_binary", lambda: Path("blender.exe"))
+    monkeypatch.setattr(worker.blender, "detect_version", lambda binary: "4.3.2")
+
+    stop = threading.Event()
+    calls = {"inference_claim": 0, "render_claim": 0, "inference_result": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/providers/work/claim":
+            calls["inference_claim"] += 1
+            return httpx.Response(200, json={"job": _job(), "poll_interval_s": 3})
+        if request.url.path == "/providers/render/claim":
+            calls["render_claim"] += 1
+            return httpx.Response(
+                200,
+                json={"frame": {"frame_id": "must_not_be_owned"}, "poll_interval_s": 3},
+            )
+        if request.url.path == "/api/chat":
+            return _ollama_response(request)
+        if request.url.path.endswith("/work/job_abc/result"):
+            calls["inference_result"] += 1
+            # Ownership has lasted from claim through execution and reporting;
+            # only now may the next loop iteration ask either endpoint again.
+            assert calls["render_claim"] == 0
+            stop.set()
+            return httpx.Response(200)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        worker.httpx,
+        "Client",
+        lambda *args, **kwargs: real_client(transport=transport),
+    )
+
+    accepting = threading.Event()
+    accepting.set()
+    worker.run(
+        ProviderState(),
+        _FakeSupervisor(),
+        accepting,
+        stop,
+        base_url="http://orch.invalid",
+    )
+
+    assert calls == {
+        "inference_claim": 1,
+        "render_claim": 0,
+        "inference_result": 1,
+    }

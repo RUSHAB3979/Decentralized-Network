@@ -17,6 +17,12 @@ in code that already shipped. Do it first so the next PR starts from a clean
 file. Then **S5 — inference ingress**, which is the largest unowned piece of
 networking in the repo and is on M2's critical path.
 
+**S9 and S10 rank below both.** They are new (2026-08-18, from
+[ADR 0006](adr/0006-render-batch-jobs.md)) and they are the agent half of the
+rendering vertical. S9 is worth reading now because it needs Blender installed
+on your machine before it is startable at all, and that is the kind of thing
+better discovered a week early than on the day.
+
 **Updated 2026-08-13, after #39.** S1, S2 and S4 all landed. S2 is complete and
 is the quality bar for the rest of this file. S1 needs one re-run on the GPU
 box — the probe ran on a machine with no NVIDIA GPU, so only the negative path
@@ -426,6 +432,82 @@ build jobs, leave the security gates alone.
 
 ---
 
+## S9 — `agent/runtime/blender.py` · `pending`
+
+The marketplace is adding a Blender rendering vertical
+([ADR 0006](adr/0006-render-batch-jobs.md)). The agent needs a second runtime
+module beside `agent/runtime/ollama.py`, which is your model for how one looks.
+
+One frame, start to finish: download the source from a presigned URL into a
+disposable working directory, run Blender headless, upload the output to a
+presigned URL, and delete the directory.
+
+```
+blender -b <file> --disable-autoexec -E CYCLES -f <N> -o <outdir>/frame_####
+```
+
+- [ ] **Locate Blender, or fail loudly.** A node advertising render capability
+      it cannot deliver claims capacity it does not have — the same class of
+      mistake as the Ollama Cloud model list, which advertised a 671B model the
+      machine could not serve. Report the version too; ADR 0006 flags version
+      drift as a silent-failure class.
+- [ ] Download, render, upload, using `httpx`. **Nothing new goes in
+      `agent/requirements.txt`** — no storage SDK, no database driver. ADR 0006
+      decision 3 is explicit that no storage credential reaches a provider
+      machine, and `httpx` already does a presigned PUT and GET.
+- [ ] **Cleanup in a `finally`, on every path.** Success, failure, timeout,
+      exception. A provider's disk filling with other people's scene files is a
+      support ticket that arrives weeks late and looks like a bug in something
+      else.
+- [ ] **An explicit timeout**, per CLAUDE.md. Note that `RUN_TIMEOUT_S` in
+      `worker.py` is 600s and sized for a model cold start; a frame can take
+      much longer, so this needs its own value and a written justification for
+      the number.
+- [ ] Parse progress from stdout so the UI can show something other than a
+      spinner. Blender prints per-tile and per-sample lines; establish what is
+      stable across the versions we support before depending on the format.
+- [ ] Report `render_seconds` **as measured wall-clock, not as a bill.** ADR
+      0006 keeps metering hand-built and `agent/core/meter.py` still raises
+      `NotImplementedError`.
+- [ ] Failure path tested deliberately: a corrupt `.blend`, a missing texture,
+      and a timeout must each produce a reported failure rather than a job that
+      sits claimed until its lease lapses.
+
+**Scope boundary.** You are not writing the sandbox. `--disable-autoexec` is a
+flag, not isolation; the sandbox is K7 and is hand-built under ADR 0002. During
+the pilot, renders run only on machines with `render_eligible = TRUE`, which
+means the founder's own. Write this module as though that will not always be
+true, and do not add a control that pretends the problem is solved.
+
+---
+
+## S10 — Teach `worker.py` about the second queue · `pending`
+
+Extend the existing loop. **Do not fork it into a second thread.**
+
+`worker.py`'s docstring already states why it runs one job at a time: concurrency
+on a provider box is hand-built under ADR 0002 because it degrades quietly. A
+render and an inference job running together fight over the same VRAM, one evicts
+the other's model, both still return correct answers, and throughput collapses
+with nothing raising. Two independent worker threads would introduce exactly that,
+and it would not show up in any test.
+
+- [ ] One loop polls both `/providers/work/claim` and
+      `/providers/render/claim`, and holds at most one job of either kind
+- [ ] A node with no Blender installed never claims a render frame
+- [ ] `accepts_work = FALSE` — the tray's drain switch — stops both kinds
+- [ ] The 401-discards-token self-heal in `claim()` works the same on the render
+      path. Read the comment there before copying it; the reason it discards
+      rather than retries is not obvious
+- [ ] A 409 on a render result is logged and dropped, exactly as it is today: the
+      lease lapsed, another node has the frame, and retrying cannot reclaim it
+- [ ] The poll interval still comes from the server, not from a constant
+
+**Sequencing:** S9 is testable on its own with a local file and no orchestrator.
+Do it first, and do not wait for the render endpoints to exist.
+
+---
+
 ## Notes
 
 Add a dated line when something changes.
@@ -435,3 +517,4 @@ Add a dated line when something changes.
 | 2026-08-10 | File created. `agent/` transferred on Block D completion. S0 supersedes the plan's "run the frozen TS agent" — a real Python agent now exists. |
 | 2026-08-12 | **S3 closed as done** — it was built during M1's single-pass implementation rather than by the per-person split, and criterion 5 came out unmet, which is now S3a. **S2 and S4 left standing but no longer current**: ADR 0003 deferred cloud gaming on 2026-08-11, which takes WebRTC, ICE and TURN off the critical path. **Four tasks added.** S5 and S6 are R2 work repointed at the inference market — the NAT problem did not go away, it changed shape. S7 and S8 are DevOps, on the back of co-ownership of `docker-compose.yml` and `ci.yml`'s build jobs granted the same day. |
 | 2026-08-13 | **#39 merged: S1, S2 and S4 delivered.** S2 is complete and is the quality bar for the rest of this file — the TURN arithmetic is shown rather than asserted. S1 is partial: the probe ran on a machine with no NVIDIA GPU, so only the negative path is answered. S4's rewrite lists WebRTC/TURN among "the real flow we have now", which is not true of this repository and needs relabelling. Both fixes are small and noted in their sections. #39 also changed three `web-client/` files, which CODEOWNERS assigns to @AdarshNarwankar, and merged with no review — flagged under Current priority. |
+| 2026-08-18 | **Two tasks added, S9 and S10**, from [ADR 0006](adr/0006-render-batch-jobs.md) — Blender batch rendering as a second workload class. They do not displace the current priority: S3a then S5 still come first, and S9 is only startable once you have Blender installed locally. Note the standing constraint the ADR restates: `agent/requirements.txt` gains nothing, because `httpx` already performs a presigned PUT and GET, and a storage credential that never reaches a provider machine cannot leak from it. |

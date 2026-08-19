@@ -208,6 +208,73 @@ a price. Listed so you know it is coming.
 
 ---
 
+## A6 — Wire `RenderJobPage.jsx` to the real API · `pending` — **blocked on the render endpoints**
+
+The page already exists at `web-client/src/components/app/RenderJobPage.jsx`,
+routed from `App.jsx:89` as `/app/render`. **The form is done — do not rebuild
+it.** Blender version, engine, frame range, output format, region, GPU profile
+and spending limit are all there. What is missing is that nothing leaves the
+browser: the file input is labelled `Sandbox · no upload`, and submitting shows
+a hard-coded job id, `render_preview_01`.
+
+[ADR 0006](adr/0006-render-batch-jobs.md) defines the flow. It is three calls,
+not one, and the middle one is the reason:
+
+1. `POST /v1/render/jobs` → `202` with a `job_id` and a **presigned PUT URL**
+2. `PUT` the `.blend` **straight to object storage** — not to our API
+3. `POST /v1/render/jobs/{id}/uploaded` → the orchestrator verifies the object
+   and fans the job out into frames
+
+- [ ] All three steps, in `web-client/src/services/renderApi.js`. New file,
+      alongside `inferenceApi.js` and `authApi.js`, following whatever those two
+      already do for base URL and auth — do not invent a fourth convention
+- [ ] The upload uses `XMLHttpRequest` or a fetch with a progress stream so the
+      user sees a percentage. A silent five-minute wait on a 400 MB file reads
+      as a broken page, and people close the tab
+- [ ] The presigned URL is short-lived. Decide and handle what the UI does when
+      it expires mid-upload — a retry that re-requests a URL, or a clear message.
+      Silently failing at 90% is the bad outcome
+- [ ] Upload failure leaves the job visibly at `awaiting_upload`, not "submitted"
+- [ ] **Delete the invented rates.** `previewRate` is currently 0.18 / 0.38 /
+      0.72 per hour and those numbers came from nowhere
+
+**On the price, read this before touching it.** The page's quote is labelled
+`Illustrative only`. ADR 0006 is explicit that those labels come off when
+metering lands and *not one commit before* — `agent/core/meter.py` still raises
+`NotImplementedError`, so there is no measured price to show. Until there is,
+either keep the label exactly as prominent as it is now, or show no number at
+all. The failure mode is not a wrong price; it is a screenshot of an invented
+price that somebody repeats as a fact. This is the same rule
+`ProviderConsolePage.jsx` already follows with its `Live` / `Preview` badges.
+
+---
+
+## A7 — Render job list and detail · `pending` — **blocked on A6**
+
+Once a job can be submitted it has to be watchable, and a render runs for
+minutes to hours. There is no synchronous path and never will be — the customer
+does not wait on a socket for this.
+
+- [ ] A list at `/app/render/jobs`: status, frame progress, submitted time
+- [ ] A detail view showing **per-frame** state. The frame is the unit of work
+      under ADR 0006, so "94 of 120 done, 2 failed and retrying" is the honest
+      display and a single percentage bar is not
+- [ ] Artifact download via presigned GETs from
+      `GET /v1/render/jobs/{id}/artifacts`
+- [ ] Cancel, wired to `DELETE /v1/render/jobs/{id}`, with the confirmation
+      making clear that frames already rendering will finish and are billable
+- [ ] Polling with a sane interval and a stop condition. A tab left open
+      overnight on a completed job must not still be polling in the morning
+- [ ] The empty state is the normal case on day one, as in A4
+
+**Note on scope.** During the pilot, renders run only on nodes explicitly
+flagged `render_eligible`, which means one machine — the founder's. A job can
+therefore sit `queued` for a long time with nothing wrong. The UI should say
+"waiting for an available renderer" rather than implying failure or, worse,
+showing an estimated start time it cannot know.
+
+---
+
 ## Notes
 
 Add a dated line when something changes.
@@ -215,3 +282,4 @@ Add a dated line when something changes.
 | Date | Note |
 |------|------|
 | 2026-08-10 | File created. Corrected §8's claim about `checkOrchestratorHealth`: the response shape was already fixed; the function is dead code with a 2s timeout in front of a ~10s worst-case response. |
+| 2026-08-18 | **Two tasks added, A6 and A7**, from [ADR 0006](adr/0006-render-batch-jobs.md) — Blender batch rendering as a second workload class. Both are blocked on orchestrator endpoints that do not exist yet, so **A1 is still the current priority** and nothing here changes that. A6 is deliberately written as "wire the page that already exists" — `RenderJobPage.jsx` is a complete form and rebuilding it would be waste. |
