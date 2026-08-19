@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent import identity
 from agent.runtime import blender
 
 
@@ -37,3 +38,21 @@ def _forget_cached_source():
     blender.forget_source_cache()
     yield
     blender.forget_source_cache()
+
+
+@pytest.fixture(autouse=True)
+def _stored_node_token(monkeypatch):
+    """Every test runs as a node that holds a credential.
+
+    The heartbeat is authenticated, so without this the suite's answer depends
+    on whether the machine running it happens to have a registered agent's
+    token in %LOCALAPPDATA%. That is not a hypothetical: this fixture lived in
+    test_reporter.py, where autouse only reaches that one module, and
+    test_link_state.py passed on a developer machine with a real token on disk
+    and failed in CI, which has none. Suite-wide is the only scope that makes
+    the answer describe the code rather than the machine.
+
+    Tests about the absent-credential path opt out by patching it back to None.
+    """
+    monkeypatch.setattr(identity, "node_token", lambda: "test-node-token")
+    monkeypatch.setattr(identity, "clear_node_token", lambda: None)

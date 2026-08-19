@@ -71,19 +71,6 @@ def telemetry(*, gpu: bool = True, rentable: bool = True, accepts: bool = True):
     )
 
 
-@pytest.fixture(autouse=True)
-def _stored_node_token(monkeypatch):
-    """Every test runs as a node that holds a credential.
-
-    The heartbeat is authenticated, so without this the suite's answer would
-    depend on whether the developer's own machine happens to have registered an
-    agent -- passing locally and failing in CI, or the reverse. Tests about the
-    absent-credential path opt out by patching it back to None.
-    """
-    monkeypatch.setattr(identity, "node_token", lambda: "test-node-token")
-    monkeypatch.setattr(identity, "clear_node_token", lambda: None)
-
-
 def test_node_id_matches_the_orchestrator_contract():
     value = identity.node_id()
     assert NODE_ID_PATTERN.match(value), value
