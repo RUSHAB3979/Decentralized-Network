@@ -356,6 +356,30 @@ Nothing is listening on that port. Check the orchestrator is running and that
 `ORCHESTRATOR_URL` in `.env` matches the port uvicorn actually bound — a stale
 `8000` against a server on `8080` produces exactly this.
 
+**`OSError: [Errno 28] No space left on device` from `py -3.11 -m venv`.**
+A disk problem wearing a Python costume. The virtualenv itself is created; what
+fails is the step after it, where `ensurepip` unpacks its bootstrap wheel into
+`%TEMP%` — `C:\Users\<you>\AppData\Local\Temp` by default. Nothing in the
+message names a drive, so check the drive before suspecting Python:
+
+```powershell
+Get-PSDrive -PSProvider FileSystem
+```
+
+If `C:` is full and another drive is not, point the temporary paths at that
+drive, delete the half-built `orchestrator\env`, and run the command again:
+
+```powershell
+New-Item -ItemType Directory -Force D:\tmp, D:\tmp\pip, D:\tmp\npm | Out-Null
+$env:TEMP = "D:\tmp"; $env:TMP = "D:\tmp"
+$env:PIP_CACHE_DIR = "D:\tmp\pip"
+$env:npm_config_cache = "D:\tmp\npm"   # for the web-client steps
+```
+
+Those last only for the current shell, which is the point — they are a way past
+a full disk, not a fix for one. Set them again in any new terminal that runs
+`venv`, `pip install`, or `npm install`.
+
 **`Activate.ps1 cannot be loaded because running scripts is disabled`.**
 PowerShell execution policy. Either call the venv's `python.exe` by path as
 shown above (which avoids activation entirely), or:

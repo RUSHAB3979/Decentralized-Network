@@ -419,14 +419,56 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------
-  # 10. GATE — all checks must pass before merge
+  # 10. SCRIPTS — PowerShell source encoding
+  # ---------------------------------------------------------------
+  scripts:
+    name: Scripts — PowerShell encoding guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: PowerShell scripts must be ASCII with no BOM
+        # Windows PowerShell 5.1 — still the default shell on a fresh Windows
+        # box — reads a BOM-less .ps1 in the system ANSI codepage, not UTF-8.
+        # A UTF-8 em-dash (E2 80 94) arrives as three mojibake characters, one
+        # of which closes a double-quoted string early, and the script dies at
+        # parse time with an error naming an innocent token. That is issue #49:
+        # scripts/ship.ps1 failed for a contributor and worked for its author,
+        # because PowerShell 7 reads the same bytes as UTF-8 and is unaffected.
+        # ASCII-only is the rule because it is the only one that holds under
+        # both hosts without depending on a BOM surviving every editor.
+        # perl and not `grep -P`: grep refuses PCRE outside a unibyte or UTF-8
+        # locale, and a refusal is a non-zero exit, which an `if` reads as
+        # "no match found". A guard that reports clean when its own scanner
+        # failed is worse than no guard.
+        run: |
+          FAIL=0
+          for f in $(git ls-files '*.ps1' '*.psm1' '*.psd1'); do
+            if perl -ne 'exit 1 if /[^\x00-\x7f]/' "$f"; then
+              echo "OK  $f"
+            else
+              echo "::error file=$f::non-ASCII byte in a PowerShell script (Windows PowerShell 5.1 will misread it)"
+              perl -ne 'print "  line $.: $_" if /[^\x00-\x7f]/' "$f" | head -20
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo ""
+            echo "Replace the offending characters with ASCII: an em-dash becomes --,"
+            echo "a curly apostrophe becomes a straight one."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------
+  # 11. GATE — all checks must pass before merge
   # ---------------------------------------------------------------
   all-checks:
     name: 🟢 All checks passed
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: always()
-    needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom, context-server]
+    needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom, context-server, scripts]
     steps:
       - name: Report results
         run: |
@@ -440,10 +482,11 @@ jobs:
           echo "security=${{ needs.security.result }}"
           echo "sbom=${{ needs.sbom.result }}"
           echo "context-server=${{ needs['context-server'].result }}"
+          echo "scripts=${{ needs.scripts.result }}"
 
       - name: Fail if any required job failed or was cancelled
         run: |
-          JOBS="changes contracts orchestrator provider-agent web python docker security sbom context-server"
+          JOBS="changes contracts orchestrator provider-agent web python docker security sbom context-server scripts"
           FAIL=0
           declare -A RESULTS=(
             [changes]="${{ needs.changes.result }}"
@@ -456,6 +499,7 @@ jobs:
             [security]="${{ needs.security.result }}"
             [sbom]="${{ needs.sbom.result }}"
             [context-server]="${{ needs['context-server'].result }}"
+            [scripts]="${{ needs.scripts.result }}"
           )
           for JOB in $JOBS; do
             R="${RESULTS[$JOB]}"

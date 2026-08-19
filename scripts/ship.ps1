@@ -40,14 +40,14 @@ $ErrorActionPreference = 'Stop'
 
 $branch = git rev-parse --abbrev-ref HEAD
 if ($branch -in @('main', 'master')) {
-    throw "You are on '$branch'. Ship from a feature branch — this script opens a PR, and a branch cannot PR into itself."
+    throw "You are on '$branch'. Ship from a feature branch -- this script opens a PR, and a branch cannot PR into itself."
 }
 
 # Uncommitted work is the most common way to ship a half-finished change:
 # the commit looks right, the working tree is where the rest of it lives.
 $dirty = git status --porcelain
 if ($dirty) {
-    Write-Host "Uncommitted changes — these will NOT be included:" -ForegroundColor Yellow
+    Write-Host "Uncommitted changes -- these will NOT be included:" -ForegroundColor Yellow
     $dirty | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
     if ((Read-Host "Continue anyway? (y/N)") -ne 'y') { return }
 }
