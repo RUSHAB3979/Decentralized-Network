@@ -141,7 +141,7 @@ timing is a founder decision, not a security-owner decision.
 
 ---
 
-## K2 — Threat model: T-01 and T-04 · `pending`
+## K2 — Threat model: T-01 and T-04 · `done` (2026-08-20)
 
 The risk register calls these two platform-killing. Model those two properly
 rather than all ten superficially.
@@ -249,7 +249,7 @@ dashboard and have completely different first moves.
 
 ---
 
-## K6 — Threat model: the untrusted `.blend` · `pending`
+## K6 — Threat model: the untrusted `.blend` · `done` (2026-08-20)
 
 This is T-04 stopped being hypothetical. [ADR 0006](adr/0006-render-batch-jobs.md)
 starts a Blender rendering vertical, and a `.blend` file can carry embedded
@@ -282,7 +282,7 @@ Deliver as `docs/risk/threat-model-untrusted-blend.md`.
 
 ---
 
-## K7 — Sandbox design — the document that retires the gate · `pending`
+## K7 — Sandbox design — the document that retires the gate · `done` (2026-08-20)
 
 ADR 0006's expiry condition is this task. Until a sandbox exists, rendering is
 restricted to one machine by a boolean, and the marketplace has one supplier.
@@ -325,5 +325,6 @@ Add a dated line when something changes.
 
 | Date | Note |
 |------|------|
+| 2026-08-20 | **K2, K6 and K7 design artifacts delivered.** Added the fail-closed runtime/cleanup contract and tests, data-lifecycle/identity policy, external penetration-test scope, CI audit, SRE objectives/alerts and incident runbooks. The design concludes that consumer Windows Sandbox/WSL2 is not the sole boundary for hostile GPU workloads; third-party render requires a certified full-VM/dedicated-GPU profile. Native gitleaks, Trivy, pip-audit, npm audit, Bandit, Syft, Ruff and promtool validation has now run and is recorded in the CI audit. K5 remains pending because Docker installation requires interactive sudo and the database-down runbook has not yet been rehearsed. K0 remains pending until its one-issue-per-gap and contributor-PR acceptance artifacts are filed. |
 | 2026-08-10 | File created. K1 blocked pending founder go-ahead — not yet given. Recorded that gitleaks passes clean on a history containing blob `05996365`. |
 | 2026-08-18 | **K6 and K7 assigned**, per [ADR 0006](adr/0006-render-batch-jobs.md). The marketplace is adding Blender rendering, which means untrusted files executing on provider hardware — T-04 with a date on it. K6 models the specific case; K7 designs the sandbox, and ADR 0006's expiry condition *is* K7. Neither blocks the pilot: rendering is gated to one machine by a column defaulting to `FALSE`. Both block that gate ever opening. Worth flagging early if K7 concludes that consumer Windows cannot host a real sandbox — that finding changes the product, and it is cheaper now than after the agent is built. |

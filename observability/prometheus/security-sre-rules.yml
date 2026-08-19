@@ -1,0 +1,133 @@
+groups:
+  - name: marketplace-safety-invariants
+    interval: 15s
+    rules:
+      - alert: MarketplaceCleanupEvidenceMissing
+        expr: marketplace_security_cleanup_pending_oldest_seconds > 60
+        for: 0m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: Terminal job cleanup has remained unverified for over 60 seconds
+          runbook: docs/runbooks/cleanup-verification-failed.md
+
+      - alert: MarketplaceCleanupVerificationFailed
+        expr: increase(marketplace_security_cleanup_receipts_total{outcome="failed"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: A provider cleanup receipt failed verification
+          runbook: docs/runbooks/cleanup-verification-failed.md
+
+      - alert: MarketplaceCanaryRecovered
+        expr: increase(marketplace_security_canary_recovered_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: A cross-job data-remanence canary was recovered
+          runbook: docs/runbooks/suspected-data-exposure.md
+
+      - alert: MarketplaceUnsandboxedAdmission
+        expr: increase(marketplace_security_unsandboxed_admissions_total{workload=~"render|cloud_gaming"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: An isolated workload was admitted without its required boundary
+          runbook: docs/runbooks/sandbox-escape.md
+
+      - alert: MarketplaceSensitiveTelemetryFinding
+        expr: increase(marketplace_security_sensitive_telemetry_findings_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: A prohibited secret or customer-data pattern was found in telemetry
+          runbook: docs/runbooks/suspected-data-exposure.md
+
+      - alert: MarketplaceOrphanCleanupLate
+        expr: marketplace_security_orphan_oldest_seconds > 300
+        for: 0m
+        labels:
+          severity: sev1
+          owner: sre-security
+        annotations:
+          summary: A provider runtime orphan has remained unresolved for over five minutes
+          runbook: docs/runbooks/cleanup-verification-failed.md
+
+  - name: marketplace-reliability
+    interval: 30s
+    rules:
+      - alert: MarketplaceDatabaseDown
+        expr: marketplace_dependency_up{dependency="postgres"} == 0
+        for: 2m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: The orchestrator is reachable but its database is down
+          runbook: docs/runbooks/orchestrator-degraded.md
+
+      - alert: MarketplaceHeartbeatFreshnessLow
+        expr: marketplace_provider_heartbeat_fresh_ratio < 0.99
+        for: 10m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: Fewer than 99 percent of accepting providers have fresh heartbeats
+          runbook: docs/runbooks/heartbeat-storm.md
+
+      - alert: MarketplaceControlPlaneFastBurn
+        expr: |
+          (
+            sum(rate(marketplace_http_requests_total{status_class="5xx"}[5m]))
+            /
+            clamp_min(sum(rate(marketplace_http_requests_total[5m])), 0.001)
+          ) > 0.072
+          and
+          (
+            sum(rate(marketplace_http_requests_total{status_class="5xx"}[1h]))
+            /
+            clamp_min(sum(rate(marketplace_http_requests_total[1h])), 0.001)
+          ) > 0.072
+        for: 2m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: The 99.5 percent control-plane availability budget is burning rapidly
+          runbook: docs/runbooks/orchestrator-degraded.md
+
+      - alert: MarketplacePlacementLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, workload) (rate(marketplace_job_placement_seconds_bucket{outcome="claimed"}[15m]))
+          )
+          > on (workload)
+          (2 * marketplace_claim_poll_interval_seconds)
+        for: 10m
+        labels:
+          severity: sev2
+          owner: sre
+        annotations:
+          summary: Job placement p95 exceeds two claim-poll intervals
+          runbook: docs/runbooks/heartbeat-storm.md
+
+      - alert: MarketplaceQuarantineLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(marketplace_security_quarantine_latency_seconds_bucket[10m]))) > 60
+        for: 2m
+        labels:
+          severity: sev0
+          owner: sre-security
+        annotations:
+          summary: Failed-cleanup quarantine latency exceeds 60 seconds
+          runbook: docs/runbooks/cleanup-verification-failed.md
