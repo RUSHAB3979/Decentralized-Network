@@ -43,6 +43,9 @@ hardware or remain on platform-controlled supply.
 
 ## Documents
 
+- [findings-register.md](findings-register.md) — every security-relevant
+  defect found, its status, and what closes it. Updated as fixes land;
+  RC-01..RC-03 have executable records in `security/tests/`.
 - [T01/T04 threat model](../risk/threat-model-t01-t04.md)
 - [Untrusted Blender threat model](../risk/threat-model-untrusted-blend.md)
 - [Render sandbox design](render-sandbox-design.md)
