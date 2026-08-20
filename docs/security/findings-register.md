@@ -12,11 +12,13 @@ people trust it.
 - Findings `RC-*` and `OPS-*` originate here. `CI-*` findings live in
   [ci-security-audit.md](ci-security-audit.md) and are referenced, not copied —
   one description, one place to update.
-- `RC-01`–`RC-03` have **executable records** in
-  `security/tests/test_failure_injection.py::OpenFindings`. Those tests assert
-  the *current* (defective) behaviour, so fixing a finding turns the test red
-  and forces this file to be updated in the same change. That is the mechanism
-  that keeps the register honest; do not weaken it.
+- Open findings carry **executable records** in
+  `security/tests/test_failure_injection.py`. While open, the test asserts the
+  *current defective* behaviour, so a fix turns it red and forces this file to
+  be updated in the same change; once fixed, it converts to a regression test in
+  `FixedFindings`. That is the mechanism that keeps the register honest — do not
+  weaken it, and see the note under RC-03 for how to pick the property so it
+  actually fires.
 
 Status values: `OPEN` · `FIXED` · `ACCEPTED` (known risk, deliberately carried)
 · `SUPERSEDED`.
@@ -27,83 +29,9 @@ Status values: `OPEN` · `FIXED` · `ACCEPTED` (known risk, deliberately carried
 
 | ID | Sev | Area | Finding |
 |---|---|---|---|
-| **RC-01** | High | `security/runtime_contract.py` | A signature verifier returning a truthy **non-bool** is accepted |
-| **RC-02** | Medium | `security/runtime_contract.py` | `SecurityController.finish()` is not idempotent — a retry permanently quarantines a healthy node |
-| **RC-03** | Medium | `security/runtime_contract.py` | `SecurityController.begin()` silently drops `maximum_audit_age` |
 | **RC-04** | Low | `security/runtime_contract.py` | Egress allowlist accepts hostnames that resolve to cloud metadata |
 | **OPS-01** | Critical | git history | Historical Postgres credential — rotation not confirmed (see `CI-02`) |
 | **OPS-02** | Low | `agent/identity.py` | Node credential stored in plaintext (accepted seam, see below) |
-
-### RC-01 — a truthy non-bool verifier is accepted
-**Status: OPEN** · found 2026-08-20
-
-`verify_cleanup` ends with:
-
-```python
-if not signature_valid:
-    reasons.append("signature_invalid")
-```
-
-`SignatureVerifier` is annotated `-> bool`, but nothing enforces it, and the
-whole point of the injection point is that callers supply their own crypto.
-Measured behaviour:
-
-| Verifier returns | `verified` |
-|---|---|
-| `"yes"` | `True` |
-| `1` | `True` |
-| `[1]` | `True` |
-| `object()` | `True` |
-
-A caller wiring in a library whose `verify()` returns a *result object* rather
-than a bool gets **every signature accepted**, silently, with the module
-reporting success. The exception path was already handled carefully
-(`except Exception → False`); this is the same idea one step further.
-
-**Fix:** `if signature_valid is not True:`. This is a behaviour change to a
-security check and belongs to whoever owns the module.
-**Closes when:** the identity comparison lands and
-`test_RC01_truthy_non_bool_verifier_is_accepted` is removed.
-
-### RC-02 — `finish()` is not idempotent
-**Status: OPEN** · found 2026-08-20
-
-```
-first  finish: verified=True   quarantined=False
-second finish: verified=False  quarantined=True  ('receipt_job_mismatch')
-can_claim(): False
-```
-
-A runner that completes cleanup, crashes before recording the outcome, and
-retries on restart bricks a healthy node — and clearance deliberately requires
-an operator audit.
-
-Worth weighing against the rest of the codebase, which is emphatic about this:
-the heartbeat is "idempotent by construction", register is an upsert precisely
-so twenty restarts leave one row. This is the one place a retry is punished.
-
-This may well be intended as fail-closed. If so it needs a comment saying so,
-because as written it reads like an oversight — and a documented decision is
-what stops the next person from "fixing" it.
-**Closes when:** either a replay of an identical, already-accepted receipt is a
-no-op, **or** a docstring states the deliberate choice and this row moves to
-`ACCEPTED`.
-
-### RC-03 — the controller drops `maximum_audit_age`
-**Status: OPEN** · found 2026-08-20
-
-`begin()` calls `authorize(posture, policy, now=now)` without forwarding the
-parameter, so the 7-day default always applies through the controller:
-
-```
-authorize(..., maximum_audit_age=1 day)  → ('audit_stale',)   refused
-controller.begin(same posture)           → allowed=True       admitted
-```
-
-A deployment that tightens audit freshness gets the loose default. It is a
-*silent policy weakening*, which is precisely the class of defect this module
-exists to prevent.
-**Closes when:** `begin()` accepts and forwards the parameter.
 
 ### RC-04 — egress allowlist accepts metadata hostnames
 **Status: OPEN (low)** · found 2026-08-20
@@ -156,7 +84,57 @@ and hardware binding are owed by `agent/core/creds.py`, which still raises
 | **OPS-04** | Medium | Agent worker busy loop — the claim endpoint answers immediately, but the loop `continue`d with no wait, polling as fast as the network allowed. Self-inflicted DoS against the orchestrator, and on metered hosting a bill that scales with how *idle* the fleet is | `2e7737c` (#43) |
 | **OPS-05** | Medium | API keys had no owner. Administration was gated on the caller being loopback with `LOCAL_DEMO_MODE` — a deployment posture, not an identity, so every caller from the right address was the same anonymous customer | `2e7737c` (#43) |
 | **OPS-06** | Medium | Inference ran on the orchestrator's own host while *claiming* to run on a selected provider. Node selection was bookkeeping; execution never left the server | `2e7737c` (#43) |
-| **CI-03** | High | `pytest.ini` discovered only `orchestrator/tests` and `agent/tests`, so the 22 security-contract tests were linted and compiled but **never executed**. Green CI, zero security tests run | this change |
+| **CI-03** | High | `pytest.ini` discovered only `orchestrator/tests` and `agent/tests`, so the 22 security-contract tests were linted and compiled but **never executed**. Green CI, zero security tests run | `e17e12d` |
+| **RC-01** | High | `verify_cleanup` ended `if not signature_valid`, so a verifier returning a truthy non-bool accepted **every** signature | `2026-08-20` |
+| **RC-02** | Medium | `SecurityController.finish()` was not idempotent — a retried delivery of an already-accepted receipt permanently quarantined a healthy node | `2026-08-20` |
+| **RC-03** | Medium | `SecurityController.begin()` dropped `maximum_audit_age`, silently applying the 7-day default to deployments that had tightened it | `2026-08-20` |
+
+### RC-01 — how it was closed
+
+`if signature_valid is not True`. An identity check accepts one value and one
+value only, so a verifier returning a result object, a string, or a non-empty
+list no longer validates a signature.
+
+A non-bool is now reported as **`verifier_contract_violation`**, separately from
+`signature_invalid`, because the two need different responses: a bad signature
+is a receipt to reject and possibly an attack, while a non-bool means this
+deployment has wired its cryptography up wrongly and *every verdict that
+verifier has ever produced is suspect*. Collapsing them would bury the second
+under the noise of the first.
+
+### RC-02 — how it was closed
+
+`SecurityController` now records the `(payload_digest, signature)` of the
+receipt it accepted, and a byte-identical redelivery returns the same success
+instead of quarantining.
+
+Recognition is deliberately narrow, because "accept it again" is a dangerous
+shape. It requires both the canonical signed bytes **and** the signature to
+match, so it cannot be reached by a receipt differing in any field — a changed
+`sandbox_id`, a flipped cleanup flag, a recovered canary — nor by replaying a
+genuine signature over altered content. It also cannot resurrect a quarantined
+node. Six tests cover those edges; they are the point of the change, not the
+happy path.
+
+The behaviour it replaces was arguably fail-closed, but it made an ordinary
+crash at an ordinary moment take a healthy provider off the marketplace
+permanently, and it was the only write in the system that punished a retry.
+
+### RC-03 — how it was closed
+
+`begin()` accepts and forwards `maximum_audit_age`, and both it and `authorize`
+now default to a single `DEFAULT_MAXIMUM_AUDIT_AGE` constant. A test asserts the
+two signatures reference the same object, because two literals in two places is
+how one gets tightened and the other keeps admitting week-old attestations.
+
+**A note on the mechanism, because it partly failed here.** RC-01 and RC-02 had
+`OpenFindings` tests that went red the moment the fix landed, exactly as
+intended. RC-03's did not: it asserted that `begin()` *uses* the seven-day
+default, which stayed true afterwards, since passing no argument still selects
+the default. The finding was that the parameter could not be supplied at all, so
+the sharp characterisation would have been `assertRaises(TypeError)`. The
+forcing function is only as good as the property each test picks — worth
+remembering when writing the next one.
 
 ### Notes on the fixed rows
 
@@ -196,11 +174,12 @@ rediscovered as surprises.
 ## Verifying this file
 
 ```bash
-pytest security/tests -q          # 45 tests; OpenFindings encodes RC-01..RC-03
+pytest security/tests -q          # 54 tests; FixedFindings regression-guards RC-01..RC-03
 pytest -q                         # security/tests is now discovered
 ruff check .
 ```
 
-A finding moving to `FIXED` should turn its `OpenFindings` test red. If a fix
-lands and every test still passes, either the fix is incomplete or the test was
-weakened — check which before updating the row.
+A finding moving to `FIXED` should turn its open-finding test red. If a fix
+lands and every test still passes, either the fix is incomplete, or the test
+asserted the wrong property — check which before updating the row. RC-03 was the
+second case.

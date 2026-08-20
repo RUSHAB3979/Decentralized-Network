@@ -12,6 +12,8 @@ an attested workload identity, not a provider-readable shared secret.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import ipaddress
 import re
@@ -62,6 +64,12 @@ _REQUIRED_TIER = {
 # A container, WSL distribution, or Windows Sandbox is not accepted as the
 # sole boundary for hostile Blender files or interactive third-party software.
 _FULL_VM_SANDBOXES = frozenset({"hyperv-vm", "kvm-vfio"})
+
+# How stale an attestation may be before admission fails closed. Defined once
+# and referenced by both `authorize` and `SecurityController.begin`: writing the
+# literal in two signatures is how one of them gets tightened and the other
+# quietly keeps admitting work against a week-old audit.
+DEFAULT_MAXIMUM_AUDIT_AGE = timedelta(days=7)
 
 
 def _aware(value: datetime) -> bool:
@@ -169,7 +177,7 @@ def authorize(
     policy: SandboxPolicy,
     *,
     now: datetime | None = None,
-    maximum_audit_age: timedelta = timedelta(days=7),
+    maximum_audit_age: timedelta = DEFAULT_MAXIMUM_AUDIT_AGE,
 ) -> AdmissionDecision:
     """Evaluate admission without modifying node state.
 
@@ -295,8 +303,25 @@ def verify_cleanup(
         signature_valid = verifier(canonical_receipt(receipt), signature, receipt.signer_key_id)
     except Exception:  # Verifier failures are denial, never availability bypasses.
         signature_valid = False
-    if not signature_valid:
-        reasons.append("signature_invalid")
+
+    # `is True`, not truthiness. SignatureVerifier is annotated `-> bool` and
+    # nothing enforces it, while the whole purpose of the injection point is
+    # that callers supply their own cryptography -- which is exactly where a
+    # library whose verify() returns a *result object* rather than a bool gets
+    # wired in. Under `if not signature_valid` that object is truthy, so every
+    # signature would validate and this module would report success. An identity
+    # check accepts one value and one value only.
+    #
+    # A non-bool is reported separately from a bad signature because the two
+    # need different responses: `signature_invalid` is a receipt to reject and
+    # possibly an attack, `verifier_contract_violation` is an integration this
+    # deployment has wired up wrongly and every verdict it produced is suspect.
+    # Collapsing them would hide the second behind the noise of the first.
+    if signature_valid is not True:
+        if signature_valid is False:
+            reasons.append("signature_invalid")
+        else:
+            reasons.append("verifier_contract_violation")
 
     return CleanupDecision(verified=not reasons, reasons=tuple(reasons))
 
@@ -313,6 +338,13 @@ class SecurityController:
     def __init__(self) -> None:
         self._active_context: tuple[str, str, WorkloadKind, str] | None = None
         self._quarantine_reasons: tuple[str, ...] = ()
+        # (payload_digest, signature) of the last receipt this controller
+        # accepted, so an identical redelivery is recognised instead of being
+        # treated as evidence for a job that is no longer running. See
+        # :meth:`finish`. The digest covers every receipt field, receipt_id
+        # included, because it is taken over the same canonical bytes that were
+        # signed.
+        self._completed: tuple[str, str] | None = None
 
     @property
     def active_job(self) -> str | None:
@@ -335,12 +367,24 @@ class SecurityController:
         policy: SandboxPolicy,
         *,
         now: datetime | None = None,
+        maximum_audit_age: timedelta = DEFAULT_MAXIMUM_AUDIT_AGE,
     ) -> AdmissionDecision:
+        """Admit one job, or refuse with reasons.
+
+        `maximum_audit_age` is forwarded to :func:`authorize`. It used to be
+        absent here, so a deployment that tightened the window got the default
+        anyway: `authorize` refused a three-day-old attestation under a one-day
+        policy while `begin` admitted the same node. That is a silent policy
+        weakening, and this state machine is the entry point callers are told to
+        use -- so it was the version almost everyone would have got.
+        """
         if self.quarantined:
             return AdmissionDecision(False, ("node_quarantined",))
         if self._active_context is not None:
             return AdmissionDecision(False, ("job_already_active",))
-        decision = authorize(posture, policy, now=now)
+        decision = authorize(
+            posture, policy, now=now, maximum_audit_age=maximum_audit_age
+        )
         if decision.allowed:
             self._active_context = (
                 policy.job_alias,
@@ -356,7 +400,15 @@ class SecurityController:
         signature: str,
         verifier: SignatureVerifier,
     ) -> CleanupDecision:
-        if self._active_context is None or receipt.job_alias != self._active_context[0]:
+        if self._active_context is None:
+            # No job is running. Either this is the same receipt arriving twice,
+            # or it is evidence for something this controller never admitted.
+            if self._is_redelivery(receipt, signature):
+                return CleanupDecision(True, ())
+            self._active_context = None
+            self._quarantine_reasons = ("receipt_job_mismatch",)
+            return CleanupDecision(False, self._quarantine_reasons)
+        if receipt.job_alias != self._active_context[0]:
             self._active_context = None
             self._quarantine_reasons = ("receipt_job_mismatch",)
             return CleanupDecision(False, self._quarantine_reasons)
@@ -374,7 +426,47 @@ class SecurityController:
         self._active_context = None
         if not decision.verified:
             self._quarantine_reasons = decision.reasons
+        else:
+            self._completed = (
+                hashlib.sha256(canonical_receipt(receipt)).hexdigest(),
+                signature,
+            )
         return decision
+
+    def _is_redelivery(self, receipt: CleanupReceipt, signature: str) -> bool:
+        """Whether this is byte-for-byte the receipt already accepted.
+
+        The runner completes cleanup, signs the receipt, sends it, and then the
+        process dies before it records that the send succeeded. On restart it
+        sends again. Without this, that second delivery quarantined a node whose
+        sandbox had in fact been torn down correctly -- and quarantine
+        deliberately requires an operator audit to clear, so an ordinary crash
+        at an ordinary moment took a healthy provider off the marketplace
+        permanently. Every other write in this system tolerates a retry: the
+        heartbeat is idempotent by construction and registration is an upsert.
+        This was the one place a retry was punished.
+
+        Recognition is deliberately narrow, because "accept it again" is a
+        dangerous shape. It requires the canonical signed bytes AND the
+        signature to match what was accepted, so it cannot be reached by a
+        receipt that differs in any field -- a different sandbox_id, a flipped
+        cleanup flag, a recovered canary -- nor by replaying a genuine signature
+        against altered content. Anything that is not a perfect duplicate takes
+        the quarantine path exactly as before.
+
+        It also cannot resurrect a quarantined node: a controller only records a
+        completion after a verified finish, and no path clears quarantine.
+        """
+        if self._completed is None or self.quarantined:
+            return False
+        expected_digest, expected_signature = self._completed
+        digest = hashlib.sha256(canonical_receipt(receipt)).hexdigest()
+        # compare_digest on both halves. The signature is not secret, but a
+        # comparison that short-circuits on the first differing byte is a habit
+        # worth not forming in a file like this one.
+        return hmac.compare_digest(digest, expected_digest) and hmac.compare_digest(
+            signature, expected_signature
+        )
 
     def reconcile_startup(self, orphan_sandbox_ids: Iterable[str]) -> bool:
         orphans = tuple(orphan_sandbox_ids)

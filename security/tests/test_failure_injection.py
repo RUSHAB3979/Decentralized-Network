@@ -285,54 +285,158 @@ class EgressPolicy(unittest.TestCase):
         self.assertIn("metadata.google.internal", p.allowed_egress_hosts)
 
 
-class OpenFindings(unittest.TestCase):
-    """Executable records of RC-01..RC-03, from docs/security/findings-register.md.
+class FixedFindings(unittest.TestCase):
+    """Regression tests for RC-01..RC-03, fixed 2026-08-20.
 
-    These assert CURRENT behaviour, including where that behaviour is the
-    finding. Each one fails when the finding is fixed, which is deliberate: the
-    fix then has to come with a register update in the same change, instead of
-    the register quietly drifting out of date.
+    These began as `OpenFindings`, asserting the defective behaviour so that a
+    fix would turn them red and force the register to be updated in the same
+    change. That worked for RC-01 and RC-02. It did NOT work for RC-03: the
+    test asserted that `begin()` uses the seven-day default, which stayed true
+    after the fix, because passing no argument still selects the default. The
+    finding was that the parameter could not be supplied at all, so the sharp
+    characterisation would have been `assertRaises(TypeError)`. Recorded because
+    the mechanism is only as good as the property each test picks.
     """
 
-    def test_RC01_truthy_non_bool_verifier_is_accepted(self):
-        # A verifier typed `-> bool` but returning a result object, a string, or
-        # a non-empty list passes `if not signature_valid`, so every signature
-        # validates. The injection point exists for callers to supply their own
-        # crypto, which is exactly where this mistake gets made.
-        r = receipt()
-        for ret in ("yes", 1, [1], object()):
-            d = verify_cleanup(r, "not-even-a-real-signature",
-                               lambda p, s, k, v=ret: v)
-            self.assertTrue(
-                d.verified,
-                "RC-01 appears fixed -- update the register and delete this test",
-            )
+    # -- RC-01 ------------------------------------------------------------
 
-    def test_RC02_finish_is_not_idempotent(self):
-        # A runner that completes cleanup, crashes before recording it, and
-        # retries on restart quarantines a healthy node permanently.
+    def test_a_non_bool_verifier_return_is_refused(self):
+        r = receipt()
+        for ret in ("yes", 1, [1], object(), "", 0, None):
+            d = verify_cleanup(r, sign(r), lambda p, s, k, v=ret: v)
+            self.assertFalse(d.verified, f"verifier returning {ret!r} was accepted")
+
+    def test_a_broken_verifier_is_reported_apart_from_a_bad_signature(self):
+        # Different responses: one is a receipt to reject, the other is an
+        # integration that has been wired up wrongly and whose every past
+        # verdict is suspect.
+        r = receipt()
+        broken = verify_cleanup(r, sign(r), lambda p, s, k: "yes")
+        self.assertIn("verifier_contract_violation", broken.reasons)
+        self.assertNotIn("signature_invalid", broken.reasons)
+
+        bad_sig = verify_cleanup(r, "wrong", good_verifier)
+        self.assertIn("signature_invalid", bad_sig.reasons)
+        self.assertNotIn("verifier_contract_violation", bad_sig.reasons)
+
+    def test_a_genuine_bool_still_works_both_ways(self):
+        r = receipt()
+        self.assertTrue(verify_cleanup(r, sign(r), good_verifier).verified)
+        self.assertFalse(verify_cleanup(r, "nope", good_verifier).verified)
+
+    # -- RC-02 ------------------------------------------------------------
+
+    def test_an_identical_redelivery_is_accepted_without_quarantine(self):
         c = SecurityController()
         c.begin(posture(), policy(), now=NOW)
         r = receipt()
-        self.assertTrue(c.finish(r, sign(r), good_verifier).verified)
-        c.finish(r, sign(r), good_verifier)
-        self.assertTrue(
-            c.quarantined,
-            "RC-02 appears fixed -- update the register and delete this test",
-        )
-        self.assertEqual(c.quarantine_reasons, ("receipt_job_mismatch",))
+        first = c.finish(r, sign(r), good_verifier)
+        second = c.finish(r, sign(r), good_verifier)
+        third = c.finish(r, sign(r), good_verifier)
+        self.assertTrue(first.verified)
+        self.assertTrue(second.verified, "a retried finish quarantined a healthy node")
+        self.assertTrue(third.verified)
+        self.assertFalse(c.quarantined)
+        self.assertTrue(c.can_claim())
 
-    def test_RC03_controller_does_not_forward_maximum_audit_age(self):
-        # authorize() honours a tighter window; begin() silently uses 7 days.
+    def test_a_near_miss_redelivery_still_quarantines(self):
+        # The dangerous shape. Recognition must be byte-exact, or "accept it
+        # again" becomes a way to substitute weaker evidence for the receipt
+        # that was actually verified.
+        for changed in (
+            {"sandbox_id": "sandbox_OTHERX"},
+            {"volume_destroyed": False},
+            {"canary_markers_recovered": 3},
+            {"finished_at": NOW + timedelta(minutes=9)},
+            {"signer_key_id": "other-key:v1"},
+        ):
+            c = SecurityController()
+            c.begin(posture(), policy(), now=NOW)
+            good = receipt()
+            self.assertTrue(c.finish(good, sign(good), good_verifier).verified)
+
+            tampered = replace(good, **changed)
+            d = c.finish(tampered, sign(tampered), good_verifier)
+            self.assertFalse(d.verified, f"near-miss {changed} was accepted as a retry")
+            self.assertTrue(c.quarantined, f"near-miss {changed} did not quarantine")
+
+    def test_a_replayed_signature_over_altered_content_is_refused(self):
+        c = SecurityController()
+        c.begin(posture(), policy(), now=NOW)
+        good = receipt()
+        signature = sign(good)
+        self.assertTrue(c.finish(good, signature, good_verifier).verified)
+
+        # Same signature, different receipt. Matching one half is not enough.
+        tampered = replace(good, sandbox_id="sandbox_OTHERX")
+        self.assertFalse(c.finish(tampered, signature, good_verifier).verified)
+        self.assertTrue(c.quarantined)
+
+    def test_redelivery_cannot_resurrect_a_quarantined_node(self):
+        c = SecurityController()
+        c.begin(posture(), policy(), now=NOW)
+        good = receipt()
+        c.finish(good, sign(good), good_verifier)
+        c.begin(posture(), policy(job_alias="job_SECONDXXX"), now=NOW)
+        stray = receipt(job_alias="job_SECONDXXX", volume_destroyed=False)
+        c.finish(stray, sign(stray), good_verifier)
+        self.assertTrue(c.quarantined)
+
+        # The earlier good receipt must not talk the node back to health.
+        d = c.finish(good, sign(good), good_verifier)
+        self.assertFalse(d.verified)
+        self.assertTrue(c.quarantined)
+
+    def test_an_old_receipt_arriving_during_a_new_job_still_quarantines(self):
+        c = SecurityController()
+        c.begin(posture(), policy(), now=NOW)
+        first = receipt()
+        c.finish(first, sign(first), good_verifier)
+        c.begin(posture(), policy(job_alias="job_SECONDXXX"), now=NOW)
+        d = c.finish(first, sign(first), good_verifier)
+        self.assertFalse(d.verified, "a stale receipt was accepted mid-job")
+        self.assertTrue(c.quarantined)
+
+    def test_a_receipt_for_a_job_never_admitted_still_quarantines(self):
+        c = SecurityController()
+        r = receipt()
+        d = c.finish(r, sign(r), good_verifier)
+        self.assertFalse(d.verified)
+        self.assertIn("receipt_job_mismatch", d.reasons)
+
+    # -- RC-03 ------------------------------------------------------------
+
+    def test_begin_forwards_a_tighter_audit_window(self):
         stale = posture(last_audit_at=NOW - timedelta(days=3))
-        direct = authorize(stale, policy(), now=NOW,
-                           maximum_audit_age=timedelta(days=1))
-        self.assertIn("audit_stale", direct.reasons)
-        via_controller = SecurityController().begin(stale, policy(), now=NOW)
-        self.assertTrue(
-            via_controller.allowed,
-            "RC-03 appears fixed -- update the register and delete this test",
+        d = SecurityController().begin(
+            stale, policy(), now=NOW, maximum_audit_age=timedelta(days=1)
         )
+        self.assertFalse(d.allowed, "begin ignored the tighter window")
+        self.assertIn("audit_stale", d.reasons)
+
+    def test_begin_and_authorize_agree_on_the_same_window(self):
+        stale = posture(last_audit_at=NOW - timedelta(days=3))
+        for window, expected in ((timedelta(days=1), False), (timedelta(days=7), True)):
+            direct = authorize(stale, policy(), now=NOW, maximum_audit_age=window)
+            viac = SecurityController().begin(
+                stale, policy(), now=NOW, maximum_audit_age=window
+            )
+            self.assertEqual(direct.allowed, expected)
+            self.assertEqual(
+                viac.allowed, direct.allowed,
+                f"begin and authorize disagreed at {window}",
+            )
+
+    def test_the_default_window_is_defined_once(self):
+        # Two literals in two signatures is how one gets tightened and the
+        # other keeps admitting week-old attestations.
+        import inspect
+
+        from security.runtime_contract import DEFAULT_MAXIMUM_AUDIT_AGE
+
+        for fn in (authorize, SecurityController.begin):
+            got = inspect.signature(fn).parameters["maximum_audit_age"].default
+            self.assertIs(got, DEFAULT_MAXIMUM_AUDIT_AGE)
 
 
 if __name__ == "__main__":
