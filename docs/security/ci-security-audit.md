@@ -19,7 +19,11 @@ password; no container image or live database drill was executed.
 | SBOM | SPDX JSON artifact is generated for selected TypeScript orchestrator/agent path changes and retained 90 days. It is not signed/attested and does not comprehensively trigger on Python/security/runtime changes. |
 | Least workflow permissions | Workflow defaults to read; security adds only `security-events: write`. Good baseline. |
 | Reproducibility | npm locks and exact top-level Python pins exist. Transitive Python dependencies are not hash-locked; provider Windows dependencies are not installed/tested by the Python job. |
-| Security contract tests | New tests are dependency-free and pass locally. Root `pytest.ini` discovers only `orchestrator/tests` and `agent/tests`, so the security suite is compiled/linted but not run by existing CI. |
+| Security contract tests | Dependency-free and now discovered: `security/tests` is in `testpaths`, so CI runs 45 of them (22 contract + 23 failure-injection). RC-01..RC-03 in `test_failure_injection.py` assert current defective behaviour, so a fix turns them red and forces a register update. |
+
+> Runtime-contract findings (`RC-*`) and operational findings (`OPS-*`)
+> are tracked in [findings-register.md](findings-register.md), which also
+> carries the current status of the `CI-*` findings below.
 
 ## Findings, prioritized
 
@@ -47,10 +51,16 @@ evidence of rotation or revocation.
 **Then:** add a redacted fingerprint/custom rule regression. History purge is a
 separate disruptive operation and remains blocked on explicit founder approval.
 
-### CI-03 — security tests are absent from pytest discovery (high)
+### CI-03 — security tests are absent from pytest discovery (high) — **FIXED**
 
-`pytest.ini` limits discovery to product test roots. A regression in the
-fail-closed cleanup/admission contract will not execute in CI.
+**Status: FIXED.** `security/tests` was added to `testpaths` in `pytest.ini`.
+`pytest -q` now collects 45 security tests where it previously collected zero.
+
+`pytest.ini` limited discovery to product test roots. A regression in the
+fail-closed cleanup/admission contract would not have executed in CI. Note the
+path filter was never the problem — it triggers on `**/*.py`, so ruff and
+py_compile did run over `security/`. Only the tests were skipped, which is why
+this was invisible: every signal CI produced was green and accurate.
 
 **Required owner/fix:** R1/R3 adds `security/tests` to the official Python test
 command or the R4-owned security job. Acceptance is an intentional failing test
