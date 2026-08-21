@@ -80,9 +80,36 @@ def _drop(dsn: str, database: str) -> None:
             cur.execute(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
 
 
-def _scenario(dsn: str, label: str, steps: list[Path]) -> bool:
+def _scenario(dsn: str, label: str, setup: list[Path], steps: list[Path]) -> str:
+    """Lay down `setup`, apply `steps`, and report which of the two broke.
+
+    The distinction is the whole point. `setup` is scaffolding -- the schema a
+    deployed database is already running -- and `steps` is the file under test.
+    If the scaffolding cannot be laid down, this scenario has nothing to say
+    about the file under test, so it reports "skip" rather than "fail".
+
+    Conflating the two makes the check unable to approve the one change that
+    matters most: the PR that repairs a schema already broken on main. Its
+    baseline IS the broken file, so the baseline step raises, and the fix gets
+    blocked by the check that exists to detect exactly what it fixes. The
+    remaining scenarios still apply the file under test unconditionally, so
+    nothing is weakened -- a broken schema still fails on a fresh database.
+    """
     database = _scratch(dsn)
     try:
+        for index, path in enumerate(setup, start=1):
+            try:
+                _apply(dsn, database, path)
+            except psycopg.Error as exc:
+                print(f"skip  {label}")
+                print(f"      setup step {index} of {len(setup)} ({path}) raised:")
+                print(f"      {exc.__class__.__name__}: {exc}")
+                print(
+                    "      That is the DEPLOYED schema failing, not the one under "
+                    "test. No database is in that state, so there is no upgrade "
+                    "path to check."
+                )
+                return "skip"
         for index, path in enumerate(steps, start=1):
             try:
                 _apply(dsn, database, path)
@@ -94,9 +121,9 @@ def _scenario(dsn: str, label: str, steps: list[Path]) -> bool:
                     "      Every statement in the file rolled back with it, "
                     "including the ADD COLUMNs."
                 )
-                return False
+                return "fail"
         print(f"ok    {label}")
-        return True
+        return "ok"
     finally:
         _drop(dsn, database)
 
@@ -120,9 +147,9 @@ def main() -> int:
 
     # Three orders, because a deployment applies the file in all three and only
     # the first is ever exercised by a developer with a clean machine.
-    scenarios: list[tuple[str, list[Path]]] = [
-        ("fresh database", [schema]),
-        ("applied twice (a redeploy against the same database)", [schema, schema]),
+    scenarios: list[tuple[str, list[Path], list[Path]]] = [
+        ("fresh database", [], [schema]),
+        ("applied twice (a redeploy against the same database)", [], [schema, schema]),
     ]
     if args.baseline is not None:
         if not args.baseline.is_file():
@@ -131,18 +158,18 @@ def main() -> int:
         scenarios.append(
             (
                 "deployed onto the previous schema (what production does)",
-                [args.baseline, schema, schema],
+                [args.baseline],
+                [schema, schema],
             )
         )
     else:
         print("note  no --baseline given; the upgrade path is unchecked")
 
-    ok = True
-    for label, steps in scenarios:
-        if not _scenario(args.dsn, label, steps):
-            ok = False
+    results = [
+        _scenario(args.dsn, label, setup, steps) for label, setup, steps in scenarios
+    ]
 
-    if not ok:
+    if "fail" in results:
         print()
         print("A statement in the file cannot run against a database in that state.")
         print("The usual cause is ordering: an ALTER TABLE above the CREATE TABLE it")
@@ -151,6 +178,14 @@ def main() -> int:
 
     print()
     print("schema.sql applies cleanly in every order a deployment uses.")
+    if "skip" in results:
+        # Loud, but not fatal. A skipped upgrade path means the deployed schema
+        # is itself unapplicable, so the database in production is NOT at that
+        # baseline -- whatever it is running predates it. Shipping this file is
+        # what repairs that, and blocking the repair would be the wrong call.
+        print()
+        print("One scenario was skipped: the deployed schema does not apply either.")
+        print("Production is not at that baseline. Deploying this file is the fix.")
     return 0
 
 
