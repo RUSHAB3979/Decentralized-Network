@@ -133,6 +133,18 @@ def signups_open() -> bool:
     return value not in {"false", "0", "no", "off"}
 
 
+# Why this is remembered rather than only printed. `schema.sql` runs as a
+# single statement in a single transaction, so one bad statement rolls back
+# every other one in the file -- including the ADD COLUMNs. The app then boots
+# against a database missing columns the code selects, and every authenticated
+# request 503s while /health, which only pinged connectivity, kept answering
+# "ok". That is exactly what happened after the render tables landed: a schema
+# that could not apply to any database, fresh or existing, ran in production
+# for days looking healthy. The startup log line said so and nobody was reading
+# it. Health checks are read, so the failure belongs here.
+_schema_error: str | None = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Create the M1 tables on boot, but never refuse to boot over it.
@@ -143,11 +155,14 @@ async def lifespan(_: FastAPI):
     starts, /health reports degraded, and the provider endpoints return 503
     with the actual reason.
     """
+    global _schema_error
     try:
         db.apply_schema()
+        _schema_error = None
         print("[orchestrator] schema applied")
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
-        print(f"[orchestrator] schema not applied: {exc.__class__.__name__}: {exc}")
+        _schema_error = f"{exc.__class__.__name__}: {exc}"
+        print(f"[orchestrator] schema not applied: {_schema_error}")
     yield
 
 
@@ -260,7 +275,24 @@ def health():
             status_code=503,
             content={"status": "degraded", "db": "down", "version": VERSION},
         )
-    return {"status": "ok", "db": "ok", "version": VERSION}
+    # Reachable is not the same as usable. A database that answers SELECT 1 but
+    # is missing the columns this process selects serves 503 on every
+    # authenticated route, and reporting that as "ok" is how such a deploy
+    # survives unnoticed. The class name is carried but not the statement text:
+    # this endpoint is unauthenticated, and "UndefinedTable" is enough for an
+    # operator to go and read the boot log that has the rest.
+    if _schema_error is not None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "db": "ok",
+                "schema": "not applied",
+                "error": _schema_error.split(":", 1)[0],
+                "version": VERSION,
+            },
+        )
+    return {"status": "ok", "db": "ok", "schema": "ok", "version": VERSION}
 
 
 @app.post("/providers/register", response_model=RegisterResponse)

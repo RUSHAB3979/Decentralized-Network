@@ -234,19 +234,6 @@ ALTER TABLE inference_requests
 -- cleaned up. This is the first constraint in this file that cannot be
 -- expressed as a plain idempotent ALTER, which is the Alembic threshold
 -- db.py's docstring names -- noted, not crossed.
--- What the customer said the .blend would weigh, kept separately from
--- source_bytes, which is what the object actually turned out to weigh.
---
--- Two different facts that were being stored in one column. The declared figure
--- is needed after submission because it is signed into the upload URL -- the
--- presigned PUT binds Content-Length, so the bucket itself refuses an upload of
--- any other size, and re-minting that URL later requires remembering the number
--- it was minted against. Overloading source_bytes would have made "declared"
--- and "measured" indistinguishable exactly when the difference matters, which
--- is while investigating an upload that was refused.
-ALTER TABLE render_jobs
-    ADD COLUMN IF NOT EXISTS declared_source_bytes BIGINT;
-
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM marketplace_api_keys WHERE user_id IS NULL) THEN
@@ -437,6 +424,19 @@ CREATE TABLE IF NOT EXISTS render_jobs (
 
 CREATE INDEX IF NOT EXISTS render_jobs_user_idx
     ON render_jobs (user_id, created_at DESC);
+
+-- What the customer said the .blend would weigh, kept separately from
+-- source_bytes, which is what the object actually turned out to weigh.
+--
+-- Two different facts that were being stored in one column. The declared figure
+-- is needed after submission because it is signed into the upload URL -- the
+-- presigned PUT binds Content-Length, so the bucket itself refuses an upload of
+-- any other size, and re-minting that URL later requires remembering the number
+-- it was minted against. Overloading source_bytes would have made "declared"
+-- and "measured" indistinguishable exactly when the difference matters, which
+-- is while investigating an upload that was refused.
+ALTER TABLE render_jobs
+    ADD COLUMN IF NOT EXISTS declared_source_bytes BIGINT;
 
 -- ---------------------------------------------------------------------------
 -- One row per frame. THIS is the unit of claim, lease and retry.

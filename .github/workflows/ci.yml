@@ -461,14 +461,81 @@ jobs:
           fi
 
   # ---------------------------------------------------------------
-  # 11. GATE — all checks must pass before merge
+  # 11. SCHEMA — schema.sql must apply to a real database
+  # ---------------------------------------------------------------
+  schema:
+    name: Schema — applies to a real database
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    # orchestrator/** is inside the `python` filter, so a schema-only change
+    # triggers this. Keep it that way if the filters are ever split.
+    if: needs.changes.outputs.python == 'true'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-placeholder-not-a-secret
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      # Full history: the upgrade-path check needs main's version of the file,
+      # which a shallow clone does not have.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # From requirements.txt rather than a pin written here. What is being
+      # checked is how psycopg applies the file -- one execute, one
+      # transaction -- so the check has to run on the same driver version the
+      # orchestrator does. A second pin in this file would drift from that one
+      # silently and the check would stop describing production.
+      - name: Install orchestrator runtime dependencies
+        run: pip install -r orchestrator/requirements.txt
+
+      # The baseline is what is deployed right now, so the check answers the
+      # question a deploy actually asks: can this file be applied to the
+      # database main is already running against? On a push to main that
+      # resolves to this same commit and the scenario degenerates to applying
+      # the file twice, which is still worth running -- that is a redeploy.
+      - name: Fetch main's schema as the deployed baseline
+        run: |
+          git show origin/main:orchestrator/schema.sql > /tmp/baseline-schema.sql \
+            || echo "-- no baseline on main yet" > /tmp/baseline-schema.sql
+          wc -l /tmp/baseline-schema.sql
+
+      # pytest in CI has no Postgres, so nothing else in the pipeline ever
+      # applies this file to a server. A schema that could not be applied to
+      # any database, fresh or existing, reached production once and ran for
+      # days: the app boots regardless, answers SELECT 1, and 503s every
+      # authenticated route because the ADD COLUMNs rolled back with the one
+      # bad statement. See scripts/check_schema.py for the full reasoning.
+      - name: schema.sql must apply fresh, twice, and onto main's version
+        run: |
+          python scripts/check_schema.py \
+            --dsn postgresql://postgres:ci-placeholder-not-a-secret@localhost:5432/postgres \
+            --schema orchestrator/schema.sql \
+            --baseline /tmp/baseline-schema.sql
+
+  # ---------------------------------------------------------------
+  # 12. GATE — all checks must pass before merge
   # ---------------------------------------------------------------
   all-checks:
     name: 🟢 All checks passed
     runs-on: ubuntu-latest
     timeout-minutes: 15
     if: always()
-    needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom, context-server, scripts]
+    needs: [changes, contracts, orchestrator, provider-agent, web, python, docker, security, sbom, context-server, scripts, schema]
     steps:
       - name: Report results
         run: |
@@ -483,10 +550,11 @@ jobs:
           echo "sbom=${{ needs.sbom.result }}"
           echo "context-server=${{ needs['context-server'].result }}"
           echo "scripts=${{ needs.scripts.result }}"
+          echo "schema=${{ needs.schema.result }}"
 
       - name: Fail if any required job failed or was cancelled
         run: |
-          JOBS="changes contracts orchestrator provider-agent web python docker security sbom context-server scripts"
+          JOBS="changes contracts orchestrator provider-agent web python docker security sbom context-server scripts schema"
           FAIL=0
           declare -A RESULTS=(
             [changes]="${{ needs.changes.result }}"
@@ -500,6 +568,7 @@ jobs:
             [sbom]="${{ needs.sbom.result }}"
             [context-server]="${{ needs['context-server'].result }}"
             [scripts]="${{ needs.scripts.result }}"
+            [schema]="${{ needs.schema.result }}"
           )
           for JOB in $JOBS; do
             R="${RESULTS[$JOB]}"

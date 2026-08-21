@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from orchestrator import main
 from orchestrator.main import app, heartbeat_interval_s, ttl
 
 NODE_ID = "a1b2c3d4e5f6a7b8"
@@ -383,3 +384,78 @@ def test_the_documentation_page_is_exempt_from_the_content_policy(client):
     assert response.status_code == 200
     assert "Content-Security-Policy" not in response.headers
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+class _FakeCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, *args, **kwargs):
+        return None
+
+    def fetchone(self):
+        return {"?column?": 1}
+
+
+class _FakeConn:
+    """Answers SELECT 1 and nothing else. Reachable, which is the whole point.
+
+    It accepts commit() because the lifespan handler runs apply_schema() over
+    this same fake on TestClient entry. Accepting the write is what lets the
+    test then set the flag by hand and describe the state that matters: a
+    database this process can talk to, holding a schema it cannot use.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def cursor(self):
+        return _FakeCursor()
+
+    def commit(self):
+        return None
+
+
+def test_health_is_degraded_when_the_schema_did_not_apply(monkeypatch):
+    """A reachable database is not a usable one.
+
+    schema.sql runs as one statement in one transaction, so a single bad
+    statement rolls the whole file back and the ADD COLUMNs never land. The
+    process then boots and 503s every authenticated request while SELECT 1
+    keeps succeeding. Reporting that as "ok" is how such a deploy survives in
+    production unnoticed, which is exactly what happened once already.
+    """
+    monkeypatch.setattr(main.db, "connect", lambda: _FakeConn())
+    failure = 'UndefinedTable: relation "render_jobs" does not exist'
+
+    with TestClient(app) as client:
+        # Set inside the context: the lifespan handler runs on entry and would
+        # otherwise overwrite it. This is the state a real deploy is left in.
+        monkeypatch.setattr(main, "_schema_error", failure)
+        response = client.get("/health")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["db"] == "ok"
+    assert body["schema"] == "not applied"
+    # The class name, not the statement text: /health is unauthenticated.
+    assert body["error"] == "UndefinedTable"
+    assert "render_jobs" not in response.text
+
+
+def test_health_is_ok_only_when_the_schema_applied(monkeypatch):
+    monkeypatch.setattr(main.db, "connect", lambda: _FakeConn())
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(main, "_schema_error", None)
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["schema"] == "ok"
