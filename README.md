@@ -90,15 +90,14 @@ Open `.env` and set a real `POSTGRES_PASSWORD`.
 ### 2. Start Postgres
 
 ```powershell
-docker compose up -d db
+docker compose up -d
 ```
 
-> **`db` is not optional — do not run bare `docker compose up`.**
->
-> `docker-compose.yml` still describes the frozen TypeScript stack. Its
-> `orchestrator` service is `image: node:20` bound to **port 8080** — the same
-> port the Python app wants. Bring the whole file up and a Node process takes
-> the port, and the bind error you get will not mention Docker anywhere.
+This starts only `db`. The frozen TypeScript stack (`services/`) is quarantined
+behind a Compose `legacy` profile — see `docker-compose.yml` — so it never
+starts by default and port 8080 stays free for the Python orchestrator below.
+If you ever need the old stack on purpose, run
+`docker compose --profile legacy up`.
 
 Confirm it came up healthy (this takes a few seconds — `starting` is normal at
 first):
@@ -389,7 +388,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 **Port 8080 already in use.**
-Usually the frozen Node orchestrator from a bare `docker compose up`. Find it:
+The frozen Node orchestrator is quarantined behind the `legacy` Compose
+profile and should not be running unless you started it on purpose with
+`docker compose --profile legacy up`. Find whatever is holding the port:
 
 ```powershell
 netstat -ano | Select-String ":8080" | Select-String "LISTENING"

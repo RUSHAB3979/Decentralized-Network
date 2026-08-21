@@ -37,16 +37,20 @@ Use `.env.example` as the baseline.
 
 ## 4. Docker Compose Development
 
-Run:
+`docker compose up` (or `up -d`) starts only `db` (Postgres). The Node
+orchestrator and provider-agent containers described below are the **frozen**
+TypeScript stack (`services/`) and are quarantined behind a Compose `legacy`
+profile — they do not start unless you ask for them:
 
 ```bash
-docker compose up
+docker compose --profile legacy up
 ```
 
 Notes:
 
-- Compose uses `ORCHESTRATOR_URL=http://orchestrator:8080` for the provider-agent container.
-- Repository is mounted into both containers; code changes are reflected live.
+- Compose uses `ORCHESTRATOR_URL=http://orchestrator:8080` for the provider-agent container, but only when the `legacy` profile is active.
+- Repository is mounted into both legacy containers; code changes are reflected live.
+- For day-to-day development against the live Python backend, start `db` with plain `docker compose up -d` and run the orchestrator/agent directly — see the root `README.md` quick start.
 
 ## 5. Basic Troubleshooting
 

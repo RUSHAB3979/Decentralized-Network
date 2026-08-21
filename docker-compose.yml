@@ -18,9 +18,22 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- ORCHESTRATOR ---
+  # --- LEGACY: frozen TypeScript stack (services/), quarantined ---
+  #
+  # `orchestrator` here is the old Node/Express control plane, not the live
+  # Python one in `orchestrator/`. It is kept only as a read-only contract
+  # reference (docs/PYTHON-FASTAPI-BACKEND-MIGRATION.md) and must never start
+  # by default: it binds the same port 8080 the live Python orchestrator uses,
+  # and a bare `docker compose up` used to hand that port to this Node process
+  # with no error that mentioned Docker at all.
+  #
+  # The `legacy` profile keeps both services out of the default service set.
+  # `docker compose up` / `docker compose up -d` never starts them. To run the
+  # frozen stack on purpose:
+  #   docker compose --profile legacy up
   orchestrator:
     image: node:20
+    profiles: ["legacy"]
     working_dir: /app
     volumes:
       - ./:/app
@@ -35,9 +48,11 @@ services:
       db:
         condition: service_healthy
 
-  # --- PROVIDER AGENT ---
+  # --- LEGACY: frozen TypeScript provider agent, quarantined ---
+  # See the `orchestrator` service above for why this is behind `legacy`.
   provider-agent:
     image: node:20
+    profiles: ["legacy"]
     working_dir: /app
     volumes:
       - ./:/app
