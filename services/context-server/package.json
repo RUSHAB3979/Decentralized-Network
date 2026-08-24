@@ -16,7 +16,7 @@
     "@graphql-tools/schema": "^10.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "graphql": "^17.0.2",
-    "graphql-yoga": "^5.21.3",
+    "graphql-yoga": "^5.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
