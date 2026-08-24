@@ -14,7 +14,7 @@
 
 # Control plane and Ollama, both over HTTP.
 httpx==0.28.1
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 
 # System tray UI. pystray is the whole reason pillow is here - it takes icons
 # as PIL images, and drawing them in code avoids shipping an .ico as a
