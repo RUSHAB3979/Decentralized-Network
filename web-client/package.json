@@ -10,7 +10,7 @@
     "build:desktop": "vite build --config vite.desktop.config.js"
   },
   "dependencies": {
-    "lucide-react": "^1.33.0",
+    "lucide-react": "^1.35.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
