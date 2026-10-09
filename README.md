@@ -1,6 +1,8 @@
-# P2P Compute Marketplace
+# GPUOrbit — P2P Compute Marketplace
 
-A decentralized marketplace for GPU compute, on two tracks:
+GPUOrbit is a decentralized GPU compute marketplace under development. It currently demonstrates local rented inference, not publicly available rentals.
+
+Longer-term product tracks:
 
 - **Cloud Gaming** — low-latency streamed sessions
 - **General Compute** — batch jobs (render, media, model inference)
