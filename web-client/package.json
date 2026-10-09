@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && npm run check:seo",
     "preview": "vite preview",
-    "build:desktop": "vite build --config vite.desktop.config.js"
+    "build:desktop": "vite build --config vite.desktop.config.js",
+    "check:seo": "node scripts/check-seo.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.35.0",
