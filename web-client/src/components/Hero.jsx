@@ -4,13 +4,13 @@ import LiquidRibbon from './fx/LiquidRibbon';
 import Reveal from './fx/Reveal';
 const consoleUrl = import.meta.env.BASE_URL + '#/app';
 const TICKER = [
-    'BLENDER RENDERING', 'OPEN MODEL APIS', 'GPU WORKSTATIONS', 'CURATED COMPUTE',
-    'VERIFIED PROVIDERS', 'USAGE METERING', 'EPHEMERAL SANDBOXES', 'CLOUD GAMING',
+    'SHARE IDLE GPUS', 'P2P COMPUTE', 'MODEL INFERENCE MVP', 'GPU PROVIDER AGENTS',
+    'PUBLIC GPU RENTALS — PLANNED', 'SECURE WORKLOADS — PLANNED',
 ];
 const STATS = [
-    { v: '03', l: 'Execution primitives' },
-    { v: '01', l: 'Shared control plane' },
-    { v: 'BYOL', l: 'Licensed software' },
+    { v: 'P2P', l: 'Network vision' },
+    { v: 'GPU', l: 'Provider hardware' },
+    { v: 'API', l: 'Local inference prototype' },
     { v: 'MVP', l: 'Current stage' },
 ];
 const Hero = () => {
@@ -30,24 +30,24 @@ const Hero = () => {
         <Reveal>
           <p className="eyebrow">
             <span className="eyebrow-accent"/>
-            Open GPU marketplace
+            GPUOrbit · P2P compute marketplace
             <span className="eyebrow-accent !mr-0 ml-4 !bg-linear-to-l"/>
           </p>
 
           <h1 className="serif-display mt-8 text-[clamp(3.2rem,9vw,7.75rem)] leading-[0.96] text-slate-50" style={{ textShadow: '0 0 80px rgba(103,232,249,0.12)' }}>
-            Every GPU workflow,
+            Your GPU. Your orbit.
             <br />
-            one <em className="serif-italic text-iridescent">open</em> fabric.
+            <em className="serif-italic text-iridescent">Compute without borders.</em>
           </h1>
 
           <p className="mx-auto mt-8 max-w-xl text-[17px] leading-[1.75] text-slate-300/90">
-            Render Blender projects, call open models, or reserve an interactive
-            workstation while verified providers earn from idle hardware.
+            GPUOrbit is building a peer-to-peer compute marketplace where anyone can offer idle GPUs or rent compute.
+            Local model inference is at MVP stage; public rentals are not yet live.
           </p>
 
           <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
             <a href={consoleUrl} className="btn-liquid group" data-mag>
-              Explore the marketplace
+              Explore the MVP
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>
             </a>
             <a href="#marketplace" className="btn-quiet" data-mag>

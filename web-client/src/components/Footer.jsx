@@ -11,7 +11,7 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
       {/* Massive wordmark — the closer */}
       <div className="select-none overflow-hidden" aria-hidden="true">
         <p className="serif-display whitespace-nowrap text-[clamp(3.5rem,11vw,10rem)] leading-none text-white/[0.045]">
-          NodeForge — liquid hardware
+          GPUOrbit — shared compute
         </p>
       </div>
 
@@ -19,10 +19,10 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
         <div>
           <a href="#top" className="flex items-center gap-3">
             <Logo className="h-8 w-8"/>
-            <span className="font-semibold tracking-tight text-slate-100">NodeForge</span>
+            <span className="font-semibold tracking-tight text-slate-100">GPUOrbit</span>
           </a>
           <p className="mt-5 max-w-xs text-[13.5px] leading-[1.75] text-slate-500">
-            The open marketplace for rendering, AI models, GPU workstations, and interactive compute.
+            A peer-to-peer GPU network in development. Public rentals, billing, and payouts are not yet live.
           </p>
         </div>
         {COLS.map(([head, links]) => (<div key={head}>
@@ -38,8 +38,8 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
       </div>
 
       <div className="mt-16 flex flex-col gap-3 border-t border-white/[0.05] pt-8 font-mono text-[10.5px] uppercase tracking-[0.24em] text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-        <span>© 2026 NodeForge</span>
-        <span className="text-emerald-500/80">Frontend preview online</span>
+        <span>© 2026 GPUOrbit</span>
+        <span className="text-emerald-500/80">MVP development</span>
         <span>Est. 2026 · Fabric v1</span>
       </div>
     </div>
