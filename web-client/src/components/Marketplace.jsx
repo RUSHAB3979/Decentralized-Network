@@ -19,8 +19,7 @@ const Marketplace = () => {
               for <em className="serif-italic text-iridescent">silicon.</em>
             </h2>
             <p className="mt-6 max-w-md text-[17px] leading-[1.75] text-slate-400">
-              Compare capacity by workload fit, verified performance, region, and price.
-              Providers choose what they run and when they are available.
+              Illustrative compute capacity by workload and region. Listings below are examples, not real GPU offers.
             </p>
 
             <div className="mt-10 inline-flex rounded-full border border-white/10 bg-white/[0.02] p-1">
@@ -45,7 +44,7 @@ const Marketplace = () => {
                 </span>
                 <span className="flex items-center gap-2 font-mono text-[10.5px] text-emerald-400">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400"/>
-                  PREVIEW DATA
+                  MOCK DATA
                 </span>
               </div>
               {ROWS.map((r, i) => (<div key={r.id} className={`flex items-center justify-between px-7 py-6 transition-colors hover:bg-white/[0.03] ${i < ROWS.length - 1 ? 'border-b border-white/[0.05]' : ''}`}>
@@ -53,7 +52,7 @@ const Marketplace = () => {
                     <div className="flex items-center gap-3">
                       <p className="font-medium tracking-tight text-slate-100">{r.id}</p>
                       {r.hot && (<span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-fuchsia-300">
-                          Popular
+                          Example
                         </span>)}
                     </div>
                     <p className="mt-1.5 font-mono text-[10.5px] uppercase tracking-[0.22em] text-slate-500">

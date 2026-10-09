@@ -118,7 +118,7 @@ const AppShell = ({ currentRoute, onNavigate, children, session }) => {
       <button type="button" onClick={() => navigate('/')} className="flex h-[72px] items-center gap-3 border-b border-white/[0.06] px-5 text-left">
         <Logo className="h-8 w-8" />
         <span className="flex flex-col leading-none">
-          <span className="text-[15px] font-semibold tracking-tight text-slate-100">NodeForge</span>
+          <span className="text-[15px] font-semibold tracking-tight text-slate-100">GPUOrbit</span>
           <span className="mt-1 font-mono text-[8px] uppercase tracking-[0.28em] text-slate-600">Compute console</span>
         </span>
       </button>

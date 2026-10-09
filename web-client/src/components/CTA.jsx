@@ -10,14 +10,14 @@ const CTA = () => (<section id="cta" className="relative overflow-hidden">
     </div>
 
     <Reveal className="relative mx-auto max-w-4xl px-6 py-44 text-center sm:px-10">
-      <p className="eyebrow"><span className="eyebrow-accent"/>Frontend sandbox — now available</p>
+      <p className="eyebrow"><span className="eyebrow-accent"/>GPUOrbit · MVP preview</p>
       <h2 className="serif-display mt-8 text-[clamp(2.8rem,8vw,6rem)] leading-[0.98] text-slate-50">
         See the product,
         <br />
         <em className="serif-italic text-iridescent">before the grid is live.</em>
       </h2>
       <p className="mx-auto mt-7 max-w-lg text-[16.5px] leading-[1.75] text-slate-300/85">
-        Explore the unified marketplace shell and create a complete Blender render-job preview without uploading data or creating a charge.
+        Explore the GPUOrbit frontend preview. Live GPU rentals, public provider onboarding, and payment collection are not enabled.
       </p>
       <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
         <a href={import.meta.env.BASE_URL + '#/app'} className="btn-liquid group" data-mag>

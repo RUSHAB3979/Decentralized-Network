@@ -74,8 +74,8 @@ const AuthPage = ({ initialMode }) => {
         <a href={baseUrl} className="flex items-center gap-3" data-mag>
           <Logo className="h-8 w-8"/>
           <span className="flex flex-col leading-none">
-            <span className="text-[15px] font-semibold tracking-tight">NodeForge</span>
-            <span className="mt-1 font-mono text-[9px] uppercase tracking-[0.32em] text-slate-500">GPU Fabric</span>
+            <span className="text-[15px] font-semibold tracking-tight">GPUOrbit</span>
+            <span className="mt-1 font-mono text-[9px] uppercase tracking-[0.32em] text-slate-500">P2P Compute</span>
           </span>
         </a>
         <a href={baseUrl} className="group flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.16em] text-slate-400 transition-colors hover:text-white" data-mag>
@@ -117,7 +117,7 @@ const AuthPage = ({ initialMode }) => {
                 <div>
                   <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-cyan-300/70">Identity gateway / 01</p>
                   <h2 className="serif-display mt-3 text-4xl text-white">{isSignup ? 'Create your account' : 'Welcome back'}</h2>
-                  <p className="mt-2 text-sm text-slate-500">{isSignup ? 'Join the world’s open GPU fabric.' : 'Reconnect to your NodeForge account.'}</p>
+                  <p className="mt-2 text-sm text-slate-500">{isSignup ? 'Join the world’s open GPU fabric.' : 'Reconnect to your GPUOrbit account.'}</p>
                 </div>
                 <span className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-indigo-300/15 bg-indigo-300/[0.06]">
                   <Zap className="h-5 w-5 text-indigo-300"/>
@@ -170,7 +170,7 @@ const AuthPage = ({ initialMode }) => {
               </form>
 
               <p className="mt-6 text-center text-xs text-slate-500">
-                {isSignup ? 'Already forged an identity?' : 'New to the fabric?'}{' '}
+                {isSignup ? 'Already have an account?' : 'New to GPUOrbit?'}{' '}
                 <button type="button" onClick={() => switchMode(isSignup ? 'login' : 'signup')} className="font-medium text-indigo-300 transition-colors hover:text-cyan-200">
                   {isSignup ? 'Sign in' : 'Create an account'}
                 </button>

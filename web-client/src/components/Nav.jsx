@@ -3,7 +3,7 @@ import { ArrowUpRight } from 'lucide-react';
 import Logo from './Logo';
 const LINKS = [
     ['Products', '#features'],
-    ['Workloads', '#workloads'],
+    ['How it works', '#how'],
     ['Market', '#marketplace'],
     ['Providers', '#marketplace'],
 ];
@@ -21,9 +21,9 @@ const Nav = () => {
         <a href="#top" className="flex items-center gap-3" data-mag>
           <Logo className="h-8 w-8"/>
           <span className="flex flex-col leading-none">
-            <span className="font-semibold tracking-tight text-[15px]">NodeForge</span>
+            <span className="font-semibold tracking-tight text-[15px]">GPUOrbit</span>
             <span className="mt-1 font-mono text-[9px] uppercase tracking-[0.32em] text-slate-500">
-              GPU Fabric
+              P2P Compute
             </span>
           </span>
         </a>

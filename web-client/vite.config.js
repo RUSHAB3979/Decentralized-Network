@@ -10,7 +10,8 @@ import react from '@vitejs/plugin-react';
 //
 // VERCEL is set by Vercel's own build environment, so this needs no
 // configuration in either place.
-const base = process.env.VERCEL ? '/' : '/Decentralized-Network/';
+const base = (process.env.VERCEL || process.env.GPUORBIT_CUSTOM_DOMAIN === 'true')
+    ? '/' : '/Decentralized-Network/';
 
 // Everywhere this bundle is allowed to talk to.
 //
