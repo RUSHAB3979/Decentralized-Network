@@ -1,0 +1,9 @@
+# Index the public marketing site. These paths are reserved for private app and auth views.
+# The current React SPA also uses #/ routes; fragment URLs cannot be excluded via robots.txt.
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /login
+Disallow: /signup
+
+Sitemap: https://gpuorbit.dev/sitemap.xml
