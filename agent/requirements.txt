@@ -22,7 +22,7 @@ python-dotenv==1.2.3
 # any reach it did not already have, which is the test that matters for this
 # file.
 pystray==0.19.5
-pillow==12.3.0
+pillow==13.0.0
 
 # Desktop dashboard. pywebview draws the window with Edge WebView2, which is
 # already on every supported Windows machine, so this ships no browser engine
