@@ -59,6 +59,9 @@ const App = () => {
     if (route === '/login' || route === '/signup') {
         return <AuthPage initialMode={route === '/signup' ? 'signup' : 'login'}/>;
     }
+    if (['/provider', '/provider/login', '/provider/signup', '/app/provider'].includes(route)) {
+        return <ProviderConsolePage route={route} onNavigate={navigate}/>;
+    }
     if (route.startsWith('/app')) {
         // The dashboard reads the signed-in account's keys, so rendering it for
         // an anonymous visitor means every panel 401s. Three states, not two:
@@ -97,7 +100,6 @@ const App = () => {
         if (route === '/app/models') page = <ModelApiPage onNavigate={navigate}/>;
         if (route === '/app/workstations') page = <WorkstationPage onNavigate={navigate}/>;
         if (route === '/app/gaming') page = <GamingPage onNavigate={navigate}/>;
-        if (route === '/app/provider') page = <ProviderConsolePage onNavigate={navigate}/>;
         if (route === '/app/billing') page = <BillingPage onNavigate={navigate}/>;
         return <AppShell currentRoute={route} onNavigate={navigate} session={session}>{page}</AppShell>;
     }

@@ -51,10 +51,12 @@ router with no address the orchestrator could dial.
 The customer's API key terminates at the orchestrator. The job envelope handed
 to a provider carries a model and messages and has no field for a credential.
 
-Prompts and responses are not stored. `inference_requests` keeps usage metadata
-as evidence of what a runtime reported; it is **not** a bill. Turning those
-counts into an amount owed is metering, which is hand-built under ADR 0002 and
-lives in `agent/core/meter.py`.
+The internal pilot stores prompts and completed responses in PostgreSQL's
+`inference_jobs` table for dispatch and result delivery. Those fields remain
+after a job finishes. Use synthetic inputs for the pilot while application-level
+encryption and terminal deletion are pending. `inference_requests` records usage
+reported by the runtime. Billing-grade metering is a separate implementation
+under ADR 0002 in `agent/core/meter.py`.
 
 ### `POST /v1/api-keys`
 
@@ -71,15 +73,73 @@ Revokes a key the calling account owns. `404` for a key belonging to somebody
 else -- deliberately the same response as a key that does not exist, so the
 endpoint cannot be used to probe for other people's key ids.
 
-## Provider Work Queue
+## Provider account sessions
 
-Agent-facing. Authenticated with the node credential returned once by
-`POST /providers/register`.
+Provider logins are separate from customer logins. All paths below use the
+`/v1/provider/auth` prefix.
 
-Scope note: that credential authenticates the transport and nothing more. Secure
-storage on the provider's machine, rotation, and binding the credential to the
-hardware are `agent/core/creds.py`'s job -- hand-built under ADR 0002 and still
-unwritten. The agent currently keeps the token in a plaintext file.
+| Method | Path | Result |
+|---|---|---|
+| POST | `/signup` | `201` with a new provider session, or `403` when signup is closed |
+| POST | `/login` | `200` with a provider session for valid credentials |
+| GET | `/me` | `200` with the profile for the provider bearer token |
+| POST | `/logout` | `204` after revoking the provider bearer token |
+
+Signup takes `email`, `password` and optional `display_name`. Login takes
+`email` and `password`. Both return `token`, `expires_at` and `provider`.
+Use `python -m orchestrator.seed_users --provider provider@example.com` to
+provision a provider account when `SIGNUPS_OPEN=false`.
+
+The web console lives at `#/provider`, with sign-in and signup at
+`#/provider/login` and `#/provider/signup`. It keeps a separate provider
+session and shows the full enrolment key only when it is issued.
+
+## Machine enrolment
+
+| Method | Path | Credential and result |
+|---|---|---|
+| POST | `/v1/provider/enrolment-keys` | Provider session. Returns `201` with a one-time key valid for 15 minutes. |
+| GET | `/v1/provider/enrolment-keys` | Provider session. Lists key prefixes and lifecycle timestamps for the account. |
+| DELETE | `/v1/provider/enrolment-keys/{key_id}` | Provider session. Revokes an owned key. |
+| POST | `/providers/enrol` | Enrolment key as a bearer header. Returns `201` with a node credential. |
+| POST | `/providers/register` | Current node credential as a bearer header. Refreshes or reconstructs telemetry and returns `200`. |
+| GET | `/v1/provider/nodes` | Provider session. Lists only the account's machines, with heartbeat status, GPU telemetry, work eligibility and revocation state. |
+| DELETE | `/v1/provider/nodes/{node_id}` | Provider session. Revokes the machine credential and clears both work permissions. |
+| GET | `/v1/provider/jobs` | Provider session. Lists up to 50 recent work records attributed to the account, newest claim first. |
+
+Both machine endpoints take the same body with `node_id` and `capability`.
+If heartbeat returns `404` for an authenticated node, send `/providers/register`
+with its current credential and retry the heartbeat. A `401` requires an owner
+to issue a new enrolment key. A lost enrolment response also needs a new key.
+A fresh enrolment clears work approval. An operator must explicitly approve
+the node for inference or the owner-controlled render pilot. See the
+[schema and rollout notes](schema/provider-accounts.md).
+
+The job list includes the work ID, workload type, node ID, claim and completion
+timestamps, and status. The server records the provider account with each claim.
+When a frame is reassigned, its row represents the latest claim. Rows from
+before account attribution are omitted. The list contains operational metadata
+only and excludes customer identity, content, object links, and billing amounts.
+
+### Pilot inference approval
+
+`POST /v1/operator/providers/nodes/{node_id}/inference-approval` takes
+`provider_account_id` and a boolean `approved`. It requires a customer session
+whose account has operator access. Approval requires a current node credential
+and a fresh heartbeat from that enrolment. Pausing works with stale telemetry.
+An owner mismatch returns `404`. A node that cannot be approved returns `409`.
+Replaying an already-applied decision returns `changed: false` after checking
+the same prerequisites.
+
+The application records approval changes and credential revocation in
+`provider_node_events` in the same transaction as the corresponding changes.
+Each record contains a timestamp, event type, node ID, provider account ID and
+authenticated actor ID.
+
+## Provider work queue
+
+Inference and frame claims require a current node credential, a fresh
+heartbeat, and operator approval for the workload.
 
 ### `POST /providers/work/claim?node_id=...`
 

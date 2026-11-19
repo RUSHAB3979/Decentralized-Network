@@ -165,6 +165,12 @@ def issue_session_token() -> tuple[str, str]:
     return secret, hash_token(secret)
 
 
+def issue_enrolment_key() -> tuple[str, str]:
+    """Return a single-use provider enrolment key and its storage digest."""
+    secret = f"nf_enrol_{secrets.token_urlsafe(32)}"
+    return secret, hash_token(secret)
+
+
 def issue_node_token() -> tuple[str, str]:
     """Return `(secret, digest)` for a provider node's transport credential.
 

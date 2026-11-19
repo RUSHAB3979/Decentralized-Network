@@ -46,6 +46,7 @@ import time
 import httpx
 
 from agent import identity
+from agent.enrolment import Enrolment
 from agent.runtime import blender
 from agent.runtime.ollama import OllamaSupervisor
 from agent.state import ProviderState, Status
@@ -90,11 +91,13 @@ class Worker:
         state: ProviderState,
         supervisor: OllamaSupervisor,
         base_url: str | None = None,
+        enrolment: Enrolment | None = None,
     ) -> None:
         self.state = state
         self.supervisor = supervisor
         self.base_url = (base_url or orchestrator_url()).rstrip("/")
         self.node_id = identity.node_id()
+        self.enrolment = enrolment or Enrolment(state, self.base_url)
         # Overwritten by the server's answer on the first successful claim.
         self.poll_interval = DEFAULT_POLL_INTERVAL_S
         # Discovery and the version probe happen once for this worker's
@@ -107,46 +110,24 @@ class Worker:
         # was told about. Two independent probes could disagree.
         self.blender_binary, self.blender_version = blender.installation()
 
-    # -- credential -------------------------------------------------------
-    #
-    # Read from disk on every use rather than cached at construction. The
-    # reporter rewrites this file whenever it re-registers, and a worker holding
-    # a stale token in memory would fail every claim with a 401 until the app
-    # was restarted -- with the file on disk already correct, which is a
-    # genuinely baffling thing to debug.
-
-    def _token(self) -> str | None:
-        return identity.node_token()
-
-    def _auth_header(self) -> dict[str, str] | None:
-        token = self._token()
-        return {"Authorization": f"Bearer {token}"} if token else None
-
-    # -- one cycle --------------------------------------------------------
-
     def _claim(self, client: httpx.Client, path: str, item_key: str) -> dict | None:
         """Ask one claim endpoint, sharing credential and pacing semantics."""
-        headers = self._auth_header()
-        if headers is None:
+        token = self.enrolment.token()
+        if not token:
             return None
         response = client.post(
             f"{self.base_url}{path}",
             params={"node_id": self.node_id},
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
             timeout=CLAIM_TIMEOUT_S,
         )
         if response.status_code == 401:
-            # The token this agent holds is not the one the orchestrator has.
-            # Almost always because the node re-registered elsewhere, or the
-            # orchestrator's database was restored. Dropping the local token
-            # makes the reporter mint a fresh one on its next registration,
-            # which is the self-healing path. Both workload classes must take
-            # this exact path: retrying either with the rejected token would
-            # leave one half of the worker permanently dead.
-            print(
-                "[worker] node credential rejected; discarding it to force re-registration"
-            )
-            identity.clear_node_token()
+            self.enrolment.reject(token)
+            return None
+        if response.status_code == 404:
+            # The reporter re-registers after its next heartbeat. The current
+            # credential is still valid when only telemetry is missing.
             return None
         response.raise_for_status()
         body = response.json()
@@ -259,16 +240,20 @@ class Worker:
         }
 
     def report(self, client: httpx.Client, job_id: str, result: dict) -> None:
-        headers = self._auth_header()
-        if headers is None:
+        token = self.enrolment.token()
+        if not token:
             return
         response = client.post(
             f"{self.base_url}/providers/work/{job_id}/result",
             params={"node_id": self.node_id},
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
             json=result,
             timeout=RESULT_TIMEOUT_S,
         )
+        if response.status_code == 401:
+            self.enrolment.reject(token)
+            return
         if response.status_code == 409:
             # The lease lapsed while this machine was still working, and the job
             # has gone to somebody else. Nothing to do but say so: retrying
@@ -279,16 +264,20 @@ class Worker:
         response.raise_for_status()
 
     def report_render(self, client: httpx.Client, frame_id: str, result: dict) -> None:
-        headers = self._auth_header()
-        if headers is None:
+        token = self.enrolment.token()
+        if not token:
             return
         response = client.post(
             f"{self.base_url}/providers/render/frames/{frame_id}/result",
             params={"node_id": self.node_id},
-            headers=headers,
+            headers={"Authorization": f"Bearer {token}"},
+            follow_redirects=False,
             json=result,
             timeout=RESULT_TIMEOUT_S,
         )
+        if response.status_code == 401:
+            self.enrolment.reject(token)
+            return
         if response.status_code == 409:
             # As with inference, lease loss transfers ownership. The uploaded
             # bytes do not make this frame ours again, and retrying this POST
@@ -306,6 +295,8 @@ def run(
     accepting: threading.Event,
     stop: threading.Event,
     base_url: str | None = None,
+    *,
+    enrolment: Enrolment | None = None,
 ) -> None:
     """Thread entry point. Returns only when `stop` is set.
 
@@ -317,7 +308,7 @@ def run(
     cleanup that only runs on the tidy path is not the same promise.
     """
     try:
-        _run_loop(state, supervisor, accepting, stop, base_url)
+        _run_loop(state, supervisor, accepting, stop, base_url, enrolment=enrolment)
     finally:
         blender.forget_source_cache()
 
@@ -328,6 +319,8 @@ def _run_loop(
     accepting: threading.Event,
     stop: threading.Event,
     base_url: str | None = None,
+    *,
+    enrolment: Enrolment | None = None,
 ) -> None:
     """The loop itself.
 
@@ -335,7 +328,7 @@ def _run_loop(
     dropped, or whose orchestrator was restarted, must resume on their own --
     requiring them to notice and relaunch the app is the same as losing them.
     """
-    worker = Worker(state, supervisor, base_url)
+    worker = Worker(state, supervisor, base_url, enrolment)
     backoff = MIN_BACKOFF_S
     poll_interval = worker.poll_interval
 

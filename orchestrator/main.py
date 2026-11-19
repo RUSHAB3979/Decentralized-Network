@@ -1,20 +1,4 @@
-"""Orchestrator HTTP surface.
-
-Provider nodes can enrol, report in, and be listed. The local demo also exposes
-an API-key-protected inference gateway that selects one configured provider,
-forwards a chat request to its local Ollama runtime, and records usage totals.
-It is a single-machine learning milestone, not a production marketplace.
-
-On authentication, or its absence: `POST /providers/heartbeat` is
-unauthenticated in M1. tasks.md item 7 asks for that decision to be written
-down rather than left implicit, and it is, in docs/adr/0004-m1-unauthenticated-
-heartbeat.md. The short version is that a node identity carries nothing of
-value until a lease or a payout is attached to it, and the credential that
-would secure it belongs in agent/core/creds.py, which is hand-built and
-unwritten. Shipping a guessed-at authentication scheme now would be worse than
-shipping none: it would look like security in code review while protecting an
-asset that does not exist yet.
-"""
+"""HTTP API for accounts, provider enrolment and GPU workloads."""
 
 from __future__ import annotations
 
@@ -24,11 +8,12 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+from typing import Annotated
 
 import psycopg
 from dotenv import load_dotenv
 from psycopg.types.json import Json
-from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import FastAPI, Header, HTTPException, Path, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -54,8 +39,12 @@ from orchestrator.models import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatUsage,
+    EnrolmentKeyCreated,
+    EnrolmentKeyView,
     HeartbeatRequest,
     HeartbeatResponse,
+    InferenceApprovalRequest,
+    InferenceApprovalView,
     JobClaimResponse,
     JobOffer,
     JobPayload,
@@ -66,6 +55,10 @@ from orchestrator.models import (
     ModelView,
     NodeList,
     NodeView,
+    OwnedNodeView,
+    ProviderAccountView,
+    ProviderSessionCreated,
+    ProviderWorkView,
     RegisterRequest,
     RegisterResponse,
     RenderArtifact,
@@ -263,14 +256,19 @@ def ping():
     return {"service": "orchestrator"}
 
 
+def _database_probe_ok() -> bool:
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError):
+        return False
+    return True
+
+
 @app.get("/health")
 def health():
-    try:
-        with db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-    except (db.NotConfigured, psycopg.Error, OSError):
+    if not _database_probe_ok():
         return JSONResponse(
             status_code=503,
             content={"status": "degraded", "db": "down", "version": VERSION},
@@ -295,94 +293,86 @@ def health():
     return {"status": "ok", "db": "ok", "schema": "ok", "version": VERSION}
 
 
-@app.post("/providers/register", response_model=RegisterResponse)
-def register(req: RegisterRequest):
-    """Enrol a node, or refresh the hardware facts of one already enrolled.
+@app.get("/metrics", include_in_schema=False)
+def metrics(authorization: Annotated[str | None, Header()] = None) -> Response:
+    token = os.getenv("METRICS_BEARER_TOKEN")
+    if not token:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not secrets.compare_digest(_bearer_digest(authorization), auth.hash_token(token)):
+        raise _unauthorized("Invalid metrics bearer token")
 
-    An upsert rather than an insert, because the agent calls this on every
-    start. Registration therefore has to be idempotent: restarting the app
-    twenty times must leave one row, not twenty, and must not reset
-    `registered_at` -- that column is how long this provider has been with us,
-    and overwriting it on every launch would quietly destroy the only tenure
-    signal we have.
+    database_ok = _database_probe_ok()
+    ready = database_ok and _schema_error is None
+    return Response(
+        content=(
+            "# HELP marketplace_dependency_up Whether the dependency probe succeeded.\n"
+            "# TYPE marketplace_dependency_up gauge\n"
+            f'marketplace_dependency_up{{dependency="postgres"}} {int(database_ok)}\n'
+            "# HELP marketplace_orchestrator_ready Whether the health check passes.\n"
+            "# TYPE marketplace_orchestrator_ready gauge\n"
+            f"marketplace_orchestrator_ready {int(ready)}\n"
+        ),
+        media_type="text/plain; version=0.0.4",
+    )
 
-    Registration now also mints the node's transport credential and returns it
-    exactly once. Re-registering rotates it, which is deliberate: the agent
-    registers on every start, so a machine that restarts gets a fresh secret and
-    an attacker holding an old one loses it. The cost is that two agents cannot
-    run as the same node -- the second registration silently invalidates the
-    first one's token, and the first agent will start failing to claim work with
-    a 401. That is the correct outcome for a duplicated install, and it is
-    visible rather than silent because the agent logs the 401 and re-registers.
 
-    Re-registration also resets `render_eligible` to FALSE, and that is the
-    reason this endpoint can stay unauthenticated without handing out render
-    work. Rotation is the point of the upsert, but rotation on an *anonymous*
-    call means anyone who knows a node_id can mint a working credential for it.
-    If the render privilege survived that, the attacker would inherit a machine
-    an operator had deliberately marked eligible and start receiving other
-    customers' .blend files -- verified reachable end to end before this line
-    existed. Resetting the column applies the rule the gate is built on: the
-    privilege is granted by a human to a specific machine, so a fresh claim on
-    that identity returns to the default and a human has to grant it again. An
-    honest agent restart is unaffected for inference and loses only a
-    permission it was never the one holding.
-
-    This narrows the blast radius; it does not authenticate enrolment. A
-    hijacker still takes over the node's inference identity and locks the
-    real agent out (tracked as Y8), which needs an enrolment credential the
-    agent holds before its first call -- a design decision, not a patch.
-    """
+def _upsert_node(cur: psycopg.Cursor, req: RegisterRequest, *, fresh_credential: bool) -> dict:
     cap = req.capability
-    node_token, token_hash = auth.issue_node_token()
+    cur.execute(
+        """
+        INSERT INTO provider_nodes (
+            node_id, hostname, os_version, cpu, logical_cores,
+            ram_total_mb, gpu_name, vram_total_mb, gpu_driver, agent_version
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (node_id) DO UPDATE SET
+            hostname = EXCLUDED.hostname,
+            os_version = EXCLUDED.os_version,
+            cpu = EXCLUDED.cpu,
+            logical_cores = EXCLUDED.logical_cores,
+            ram_total_mb = EXCLUDED.ram_total_mb,
+            gpu_name = EXCLUDED.gpu_name,
+            vram_total_mb = EXCLUDED.vram_total_mb,
+            gpu_driver = EXCLUDED.gpu_driver,
+            agent_version = EXCLUDED.agent_version,
+            node_token_hash = NULL
+        RETURNING registered_at
+        """,
+        (
+            req.node_id, cap.hostname, cap.os_version, cap.cpu, cap.logical_cores,
+            cap.ram_total_mb, cap.gpu_name, cap.vram_total_mb, cap.gpu_driver, cap.agent_version,
+        ),
+    )
+    row = cur.fetchone()
+    if fresh_credential:
+        _disable_node_work(cur, req.node_id)
+    return row
+
+
+def _disable_node_work(cur: psycopg.Cursor, node_id: str) -> None:
+    cur.execute(
+        """
+        UPDATE provider_nodes
+        SET accepts_work = FALSE, inference_eligible = FALSE, render_eligible = FALSE
+        WHERE node_id = %s
+        """,
+        (node_id,),
+    )
+
+
+@app.post("/providers/register", response_model=RegisterResponse, response_model_exclude_none=True)
+def register(req: RegisterRequest, authorization: str | None = Header(default=None)):
+    """Refresh or recreate telemetry using the current enrolled credential."""
+    digest = _bearer_digest(authorization)
     try:
-        with db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO provider_nodes (
-                        node_id, hostname, os_version, cpu, logical_cores,
-                        ram_total_mb, gpu_name, vram_total_mb, gpu_driver,
-                        agent_version, node_token_hash
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (node_id) DO UPDATE SET
-                        hostname      = EXCLUDED.hostname,
-                        os_version    = EXCLUDED.os_version,
-                        cpu           = EXCLUDED.cpu,
-                        logical_cores = EXCLUDED.logical_cores,
-                        ram_total_mb  = EXCLUDED.ram_total_mb,
-                        gpu_name      = EXCLUDED.gpu_name,
-                        vram_total_mb = EXCLUDED.vram_total_mb,
-                        gpu_driver    = EXCLUDED.gpu_driver,
-                        agent_version = EXCLUDED.agent_version,
-                        node_token_hash = EXCLUDED.node_token_hash,
-                        render_eligible = FALSE
-                    RETURNING registered_at
-                    """,
-                    (
-                        req.node_id,
-                        cap.hostname,
-                        cap.os_version,
-                        cap.cpu,
-                        cap.logical_cores,
-                        cap.ram_total_mb,
-                        cap.gpu_name,
-                        cap.vram_total_mb,
-                        cap.gpu_driver,
-                        cap.agent_version,
-                        token_hash,
-                    ),
-                )
-                row = cur.fetchone()
-            conn.commit()
+        with db.connect() as conn, conn.cursor() as cur:
+            _verify_node_credential(_node_credential(cur, req.node_id), digest)
+            row = _upsert_node(cur, req, fresh_credential=False)
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
         raise _unavailable(exc) from exc
-
     return RegisterResponse(
         node_id=req.node_id,
         registered_at=row["registered_at"],
         heartbeat_interval_s=heartbeat_interval_s(),
-        node_token=node_token,
     )
 
 
@@ -391,40 +381,14 @@ def heartbeat(
     req: HeartbeatRequest,
     authorization: str | None = Header(default=None),
 ):
-    """Record that a node is alive and what it is currently doing.
-
-    AUTHENTICATED, because this endpoint is not telemetry -- it is scheduling
-    input. Every column it writes feeds a decision: `accepts_work` and
-    `last_heartbeat_at` decide whether this node is offered anything at all,
-    `local_models` decides which requests route to it, and `blender_version`
-    decides which frames it can be given. It used to take no credential and key
-    everything on a body-supplied `node_id`, which made all of that writable by
-    anyone who knew an id -- and the ids were listed by /providers/nodes. An
-    anonymous caller could take a provider offline, or advertise models a
-    machine does not have so that work routes to a node guaranteed to fail it.
-
-    The credential is the same node token /providers/work/claim requires, so
-    this costs the agent nothing: it already holds one.
-
-    An UPDATE, not an upsert. A heartbeat for an unknown node returns 404, and
-    the agent responds by registering again. That matters because it is the
-    recovery path for a wiped or restored database: without it, agents would
-    keep heartbeating into a registry that has no row for them, every request
-    would succeed, and the fleet would appear to have vanished. Authentication
-    is deliberately asked to preserve that -- `missing_node_status=404` keeps
-    "there is no such node" distinct from "you are not that node", because the
-    first is self-healing and the second must not be.
-
-    Idempotent by construction -- every column is overwritten with the values
-    in this request -- so the agent can safely retry a heartbeat whose response
-    it never saw.
-    """
-    _authenticate_node(req.node_id, authorization, missing_node_status=404)
+    """Record telemetry from an enrolled node or an existing legacy reporter."""
+    digest = _bearer_digest(authorization)
     m = req.metrics
     received = _now()
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
+                node = _authenticate_node(cur, req.node_id, digest, telemetry_only=True)
                 cur.execute(
                     """
                     UPDATE provider_nodes SET
@@ -444,7 +408,7 @@ def heartbeat(
                     (
                         req.status,
                         req.detail,
-                        req.accepts_work,
+                        req.accepts_work and node["issued_at"] is not None,
                         m.gpu_utilisation_pct,
                         m.vram_used_mb,
                         m.temperature_c,
@@ -515,13 +479,17 @@ def list_nodes(authorization: str | None = Header(default=None)):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT node_id, hostname, os_version, cpu, logical_cores,
+                    SELECT n.node_id, hostname, os_version, cpu, logical_cores,
                            ram_total_mb, gpu_name, vram_total_mb, gpu_driver,
-                           agent_version, last_status, last_detail, accepts_work,
+                           agent_version, last_status, last_detail,
+                           (c.node_id IS NOT NULL AND c.revoked_at IS NULL
+                            AND n.accepts_work AND (n.inference_eligible OR n.render_eligible))
+                               AS accepts_work,
                            gpu_utilisation_pct, vram_used_mb, temperature_c,
                            ollama_reachable, ollama_version, local_models,
                            registered_at, last_heartbeat_at
-                    FROM provider_nodes
+                    FROM provider_nodes n
+                    LEFT JOIN provider_node_credentials c ON c.node_id = n.node_id
                     ORDER BY last_heartbeat_at DESC NULLS LAST, registered_at DESC
                     """
                 )
@@ -1196,6 +1164,41 @@ def _start_session(user_row: dict) -> SessionCreated:
     )
 
 
+def _hash_signup_password(password: str) -> str:
+    try:
+        with limits.password_hashing:
+            return auth.hash_password(password)
+    except limits.AtCapacity as exc:
+        raise _at_capacity(
+            "too many password operations in progress; retry shortly"
+        ) from exc
+
+
+def _require_login_password(password: str, account: dict | None) -> None:
+    if account is None:
+        # Spend the same KDF work for an unknown address.
+        try:
+            with limits.password_hashing:
+                auth.hash_password(password)
+        except limits.AtCapacity:
+            pass
+        raise _unauthorized("invalid email or password")
+
+    try:
+        with limits.password_hashing:
+            valid = auth.verify_password(password, account["password_hash"])
+    except limits.AtCapacity as exc:
+        raise _at_capacity(
+            "too many password operations in progress; retry shortly"
+        ) from exc
+    except auth.PasswordFormatError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"stored credential is unreadable: {exc}"
+        ) from exc
+    if not valid:
+        raise _unauthorized("invalid email or password")
+
+
 @app.post("/v1/auth/signup", response_model=SessionCreated, status_code=201)
 def signup(req: SignupRequest, request: Request):
     """Create an account and log it straight in.
@@ -1231,13 +1234,7 @@ def signup(req: SignupRequest, request: Request):
 
     email = auth.normalise_email(req.email)
     user_id = f"usr_{uuid4().hex}"
-    try:
-        with limits.password_hashing:
-            password_hash = auth.hash_password(req.password)
-    except limits.AtCapacity as exc:
-        raise _at_capacity(
-            "too many password operations in progress; retry shortly"
-        ) from exc
+    password_hash = _hash_signup_password(req.password)
 
     try:
         with db.connect() as conn:
@@ -1303,40 +1300,7 @@ def login(req: LoginRequest, request: Request):
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
         raise _unavailable(exc) from exc
 
-    if row is None:
-        # Hash a throwaway password anyway, so a request for an address with no
-        # account costs the same time as one with an account. Returning early
-        # here would make the response time an oracle for which emails are
-        # registered -- a timing side channel that needs no special tooling to
-        # exploit, only a stopwatch.
-        try:
-            with limits.password_hashing:
-                auth.hash_password(req.password)
-        except limits.AtCapacity:
-            # Refuse with the same 401 the real path gives, rather than a 503.
-            # A distinguishable response here would restore the oracle the hash
-            # above exists to close: "this address is busy" is only ever true of
-            # an address, and 503-versus-401 would say which.
-            pass
-        raise _unauthorized("invalid email or password")
-
-    try:
-        with limits.password_hashing:
-            ok = auth.verify_password(req.password, row["password_hash"])
-    except limits.AtCapacity as exc:
-        raise _at_capacity(
-            "too many password operations in progress; retry shortly"
-        ) from exc
-    except auth.PasswordFormatError as exc:
-        # Corrupt or unreadable stored hash. This is our problem, not the
-        # caller's, and reporting it as a failed login would send someone to
-        # reset a password that is in fact correct.
-        raise HTTPException(
-            status_code=500, detail=f"stored credential is unreadable: {exc}"
-        ) from exc
-
-    if not ok:
-        raise _unauthorized("invalid email or password")
+    _require_login_password(req.password, row)
     return _start_session(row)
 
 
@@ -1368,6 +1332,418 @@ def logout(authorization: str | None = Header(default=None)):
 @app.get("/v1/auth/me", response_model=UserView)
 def current_user(authorization: str | None = Header(default=None)):
     return _user_view(_authenticate_session(authorization))
+
+
+# Provider accounts use their own tables and share the customer auth primitives.
+
+def _provider_account_view(row: dict) -> ProviderAccountView:
+    return ProviderAccountView(
+        provider_account_id=row["provider_account_id"],
+        email=row["email"],
+        display_name=row["display_name"],
+        created_at=row["created_at"],
+    )
+
+
+def _bearer_digest(authorization: str | None) -> str:
+    try:
+        return auth.hash_token(inference.bearer_token(authorization))
+    except ValueError as exc:
+        raise _unauthorized(str(exc)) from exc
+
+
+def _authenticate_provider_session(authorization: str | None) -> dict:
+    token_hash = _bearer_digest(authorization)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.provider_account_id, p.email, p.display_name,
+                       p.created_at, s.expires_at, s.revoked_at
+                FROM provider_sessions s
+                JOIN provider_accounts p ON p.provider_account_id = s.provider_account_id
+                WHERE s.token_hash = %s
+                """,
+                (token_hash,),
+            )
+            row = cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    if not row or not auth.session_is_valid(row["expires_at"], row["revoked_at"], _now()):
+        raise _unauthorized("invalid or expired session")
+    return row
+
+
+def _start_provider_session(cur: psycopg.Cursor, account: dict) -> ProviderSessionCreated:
+    token, token_hash = auth.issue_session_token()
+    now = _now()
+    expires_at = auth.session_expiry(now)
+    account_id = account["provider_account_id"]
+    cur.execute(
+        """
+        INSERT INTO provider_sessions (session_id, provider_account_id, token_hash, expires_at)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (f"sess_{uuid4().hex}", account_id, token_hash, expires_at),
+    )
+    cur.execute(
+        "UPDATE provider_accounts SET last_login_at = %s WHERE provider_account_id = %s",
+        (now, account_id),
+    )
+    return ProviderSessionCreated(
+        token=token, expires_at=expires_at, provider=_provider_account_view(account)
+    )
+
+
+@app.post("/v1/provider/auth/signup", response_model=ProviderSessionCreated, status_code=201)
+def provider_signup(req: SignupRequest, request: Request):
+    if not signups_open():
+        raise HTTPException(
+            status_code=403,
+            detail="new provider accounts are closed on this deployment",
+        )
+    _rate_limit(limits.auth_by_address, f"signup:{_client_key(request)}")
+    password_hash = _hash_signup_password(req.password)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO provider_accounts (provider_account_id, email, password_hash, display_name)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (email) DO NOTHING
+                RETURNING provider_account_id, email, display_name, created_at
+                """,
+                (f"prv_{uuid4().hex}", auth.normalise_email(req.email), password_hash, req.display_name),
+            )
+            account = cur.fetchone()
+            if not account:
+                raise HTTPException(status_code=409, detail="that email already has a provider account")
+            return _start_provider_session(cur, account)
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+
+@app.post("/v1/provider/auth/login", response_model=ProviderSessionCreated)
+def provider_login(req: LoginRequest, request: Request):
+    email = auth.normalise_email(req.email)
+    _rate_limit(limits.auth_by_address, f"login:{_client_key(request)}")
+    _rate_limit(limits.auth_by_account, f"provider-login:{email}")
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT provider_account_id, email, password_hash, display_name, created_at
+                FROM provider_accounts
+                WHERE email = %s
+                """,
+                (email,),
+            )
+            account = cur.fetchone()
+        _require_login_password(req.password, account)
+        with db.connect() as conn, conn.cursor() as cur:
+            return _start_provider_session(cur, account)
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+
+@app.post("/v1/provider/auth/logout", status_code=204, response_class=Response)
+def provider_logout(authorization: str | None = Header(default=None)):
+    token_hash = _bearer_digest(authorization)
+    now = _now()
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE provider_sessions
+                SET revoked_at = COALESCE(revoked_at, %s)
+                WHERE token_hash = %s AND expires_at > %s
+                RETURNING session_id
+                """,
+                (now, token_hash, now),
+            )
+            if not cur.fetchone():
+                raise _unauthorized("invalid or expired session")
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/v1/provider/auth/me", response_model=ProviderAccountView)
+def current_provider(authorization: str | None = Header(default=None)):
+    return _provider_account_view(_authenticate_provider_session(authorization))
+
+
+@app.post("/v1/provider/enrolment-keys", response_model=EnrolmentKeyCreated, status_code=201)
+def create_enrolment_key(response: Response, authorization: str | None = Header(default=None)):
+    account = _authenticate_provider_session(authorization)
+    key, digest = auth.issue_enrolment_key()
+    now = _now()
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO provider_enrolment_keys (
+                    enrolment_key_id, provider_account_id, key_prefix, key_hash,
+                    created_at, expires_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING enrolment_key_id, key_prefix, created_at, expires_at, redeemed_at, revoked_at
+                """,
+                (f"enr_{uuid4().hex}", account["provider_account_id"], key[:17], digest,
+                 now, now + timedelta(minutes=15)),
+            )
+            row = cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return EnrolmentKeyCreated(**row, key=key)
+
+
+@app.get("/v1/provider/enrolment-keys", response_model=list[EnrolmentKeyView])
+def list_enrolment_keys(authorization: str | None = Header(default=None)):
+    account = _authenticate_provider_session(authorization)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT enrolment_key_id, key_prefix, created_at, expires_at, redeemed_at, revoked_at
+                FROM provider_enrolment_keys WHERE provider_account_id = %s
+                ORDER BY created_at DESC, enrolment_key_id
+                """,
+                (account["provider_account_id"],),
+            )
+            return cur.fetchall()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+
+
+@app.delete("/v1/provider/enrolment-keys/{key_id}", status_code=204, response_class=Response)
+def revoke_enrolment_key(key_id: str, authorization: str | None = Header(default=None)):
+    account = _authenticate_provider_session(authorization)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE provider_enrolment_keys SET revoked_at = COALESCE(revoked_at, now())
+                WHERE enrolment_key_id = %s AND provider_account_id = %s
+                RETURNING enrolment_key_id
+                """,
+                (key_id, account["provider_account_id"]),
+            )
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="enrolment key not found")
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return Response(status_code=204)
+
+
+@app.post("/providers/enrol", response_model=RegisterResponse, status_code=201)
+def enrol_node(
+    req: RegisterRequest,
+    response: Response,
+    authorization: str | None = Header(default=None),
+):
+    """Spend an enrolment key and bind the supplied node ID in one transaction."""
+    digest = _bearer_digest(authorization)
+    token, token_hash = auth.issue_node_token()
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE provider_enrolment_keys SET redeemed_at = clock_timestamp()
+                WHERE key_hash = %s AND redeemed_at IS NULL AND revoked_at IS NULL
+                  AND expires_at > clock_timestamp()
+                RETURNING provider_account_id
+                """,
+                (digest,),
+            )
+            key = cur.fetchone()
+            if not key:
+                raise _unauthorized("invalid, expired or already used enrolment key")
+            cur.execute(
+                """
+                INSERT INTO provider_node_credentials (node_id, provider_account_id, token_hash, issued_at)
+                VALUES (%s, %s, %s, clock_timestamp())
+                ON CONFLICT (node_id) DO UPDATE SET
+                    token_hash = EXCLUDED.token_hash, issued_at = clock_timestamp(), revoked_at = NULL
+                WHERE provider_node_credentials.provider_account_id = EXCLUDED.provider_account_id
+                RETURNING node_id
+                """,
+                (req.node_id, key["provider_account_id"], token_hash),
+            )
+            if not cur.fetchone():
+                raise HTTPException(status_code=409, detail="node belongs to another provider")
+            row = _upsert_node(cur, req, fresh_credential=True)
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return RegisterResponse(
+        node_id=req.node_id,
+        registered_at=row["registered_at"],
+        heartbeat_interval_s=heartbeat_interval_s(),
+        node_token=token,
+    )
+
+
+@app.get("/v1/provider/nodes", response_model=list[OwnedNodeView])
+def list_owned_nodes(authorization: str | None = Header(default=None)):
+    account = _authenticate_provider_session(authorization)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.node_id, c.revoked_at, n.hostname, n.last_heartbeat_at,
+                       n.gpu_name, n.vram_total_mb, n.gpu_utilisation_pct, n.temperature_c,
+                       COALESCE(n.ollama_reachable, FALSE) AS ollama_reachable,
+                       COALESCE(n.accepts_work, FALSE) AS accepts_work,
+                       COALESCE(n.inference_eligible, FALSE) AS inference_eligible,
+                       COALESCE(n.render_eligible, FALSE) AS render_eligible
+                FROM provider_node_credentials c
+                LEFT JOIN provider_nodes n ON n.node_id = c.node_id
+                WHERE c.provider_account_id = %s
+                ORDER BY c.node_id
+                """,
+                (account["provider_account_id"],),
+            )
+            rows = cur.fetchall()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    now, window = _now(), ttl()
+    return [{**row, "liveness": liveness(row["last_heartbeat_at"], now, window)} for row in rows]
+
+
+@app.delete("/v1/provider/nodes/{node_id}", status_code=204, response_class=Response)
+def revoke_owned_node(
+    node_id: Annotated[str, Path(min_length=8, max_length=64)],
+    authorization: str | None = Header(default=None),
+):
+    account = _authenticate_provider_session(authorization)
+    account_id = account["provider_account_id"]
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            credential = _node_credential(cur, node_id)
+            if not credential or credential["provider_account_id"] != account_id:
+                raise HTTPException(status_code=404, detail="node not found")
+            if credential["revoked_at"] is not None:
+                return Response(status_code=204)
+            cur.execute(
+                """
+                UPDATE provider_node_credentials SET revoked_at = clock_timestamp()
+                WHERE node_id = %s
+                """,
+                (node_id,),
+            )
+            _disable_node_work(cur, node_id)
+            _record_provider_node_event(cur, node_id, account_id, account_id, "node_credential_revoked")
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return Response(status_code=204)
+
+
+def _record_provider_node_event(
+    cur: psycopg.Cursor, node_id: str, provider_account_id: str, actor_id: str, event_type: str,
+) -> None:
+    cur.execute(
+        """
+        INSERT INTO provider_node_events (node_id, provider_account_id, actor_id, event_type)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (node_id, provider_account_id, actor_id, event_type),
+    )
+
+
+@app.post("/v1/operator/providers/nodes/{node_id}/inference-approval", response_model=InferenceApprovalView)
+def set_provider_inference_approval(
+    node_id: Annotated[str, Path(min_length=8, max_length=64)],
+    request: InferenceApprovalRequest,
+    authorization: str | None = Header(default=None),
+):
+    operator = _authenticate_session(authorization)
+    if not operator["is_operator"]:
+        raise HTTPException(status_code=403, detail="operator access required")
+    account_id = request.provider_account_id
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            # Claims, re-enrolment and revocation all acquire this same lock.
+            credential = _node_credential(cur, node_id)
+            if not credential or credential["provider_account_id"] != account_id:
+                raise HTTPException(status_code=404, detail="enrolled node for this provider not found")
+            if request.approved and credential["revoked_at"] is not None:
+                raise HTTPException(status_code=409, detail="the node credential has been revoked")
+            cur.execute(
+                """
+                SELECT inference_eligible, last_heartbeat_at
+                FROM provider_nodes WHERE node_id = %s FOR UPDATE
+                """,
+                (node_id,),
+            )
+            node = cur.fetchone()
+            if not node:
+                raise HTTPException(status_code=409, detail="node must register before its approval can change")
+            if request.approved:
+                heartbeat = node["last_heartbeat_at"]
+                if (
+                    liveness(heartbeat, _now(), ttl()) != "online"
+                    or heartbeat < credential["issued_at"]
+                ):
+                    raise HTTPException(
+                        status_code=409, detail="a fresh heartbeat with the current credential is required",
+                    )
+            changed = node["inference_eligible"] != request.approved
+            if changed:
+                cur.execute(
+                    "UPDATE provider_nodes SET inference_eligible = %s WHERE node_id = %s",
+                    (request.approved, node_id),
+                )
+                event = "inference_approved" if request.approved else "inference_paused"
+                _record_provider_node_event(cur, node_id, account_id, operator["user_id"], event)
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return InferenceApprovalView(
+        node_id=node_id, provider_account_id=account_id,
+        inference_eligible=request.approved, changed=changed,
+    )
+
+
+@app.get("/v1/provider/jobs", response_model=list[ProviderWorkView])
+def list_provider_jobs(authorization: str | None = Header(default=None)):
+    """Read recent work attributed to the signed-in provider at claim time."""
+    account = _authenticate_provider_session(authorization)
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH recent_work AS (
+                    (SELECT job_id AS work_id, 'inference' AS workload, node_id, status,
+                            claimed_at, completed_at, lease_expires_at, FALSE AS cancelled
+                     FROM inference_jobs
+                     WHERE provider_account_id = %(account)s AND claimed_at IS NOT NULL
+                     ORDER BY claimed_at DESC, job_id
+                     LIMIT 50)
+                    UNION ALL
+                    (SELECT f.frame_id, 'render_frame', f.node_id, f.status,
+                            f.claimed_at, f.completed_at, f.lease_expires_at, r.status = 'cancelled'
+                     FROM render_frames f
+                     JOIN render_jobs r ON r.job_id = f.job_id
+                     WHERE f.provider_account_id = %(account)s AND f.claimed_at IS NOT NULL
+                     ORDER BY f.claimed_at DESC, f.frame_id
+                     LIMIT 50)
+                )
+                SELECT work_id, workload, node_id, claimed_at, completed_at,
+                       CASE
+                           WHEN status <> 'claimed' THEN status
+                           WHEN cancelled THEN 'cancelled'
+                           WHEN lease_expires_at < %(now)s THEN 'lease_expired'
+                           ELSE status
+                       END AS status
+                FROM recent_work
+                ORDER BY claimed_at DESC, workload, work_id
+                LIMIT 50
+                """,
+                {"account": account["provider_account_id"], "now": _now()},
+            )
+            return cur.fetchall()
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
 
 
 # ===========================================================================
@@ -1422,61 +1798,59 @@ def dispatch_wait_s() -> float:
         return 120.0
 
 
-def _authenticate_node(
-    node_id: str,
-    authorization: str | None,
-    *,
-    missing_node_status: int = 401,
-) -> dict:
-    """Prove that this caller is the machine that registered as `node_id`.
+def _node_credential(cur: psycopg.Cursor, node_id: str) -> dict | None:
+    # Every owned-node claim holds this lock through the queue update. A
+    # credential change or revocation therefore has a defined order vs claims.
+    cur.execute(
+        """
+        SELECT provider_account_id, token_hash, issued_at, revoked_at
+        FROM provider_node_credentials WHERE node_id = %s FOR UPDATE
+        """,
+        (node_id,),
+    )
+    return cur.fetchone()
 
-    HAND-BUILT SEAM. This is transport authentication and nothing more: it stops
-    an arbitrary internet host from claiming another provider's work or posting
-    fabricated results. It is not agent/core/creds.py, which is hand-built under
-    ADR 0002 and owes DPAPI-backed storage, rotation, and binding the credential
-    to the machine. The agent currently keeps this token in a plaintext file, so
-    anyone with local access to a provider's PC still has their identity.
-    """
-    try:
-        token = inference.bearer_token(authorization)
-    except ValueError as exc:
-        raise _unauthorized(str(exc)) from exc
 
-    try:
-        with db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT node_id, node_token_hash, accepts_work, ollama_reachable,
-                           local_models, last_heartbeat_at,
-                           render_eligible, blender_version
-                    FROM provider_nodes WHERE node_id = %s
-                    """,
-                    (node_id,),
-                )
-                row = cur.fetchone()
-    except (db.NotConfigured, psycopg.Error, OSError) as exc:
-        raise _unavailable(exc) from exc
-
-    if not row or not row["node_token_hash"]:
-        # A node registered before this column existed has no token and cannot
-        # claim work. Re-registering mints one, which the agent does on its next
-        # start, so this heals itself rather than needing an operator.
-        #
-        # Callers that have a self-healing path for a genuinely absent node ask
-        # for 404 here. Heartbeat is the one that does: the agent re-registers
-        # on 404, which is how a wiped or restored database repopulates itself.
-        # Answering 401 there would leave every agent retrying forever against a
-        # registry that has no row for them.
-        if missing_node_status == 404:
-            raise HTTPException(
-                status_code=404,
-                detail=f"unknown node {node_id}; register before heartbeating",
-            )
-        raise _unauthorized("unknown node, or node has no credential; register again")
-    if not secrets.compare_digest(row["node_token_hash"], auth.hash_token(token)):
+def _verify_node_credential(credential: dict | None, digest: str) -> None:
+    if (
+        not credential
+        or credential["revoked_at"] is not None
+        or not secrets.compare_digest(credential["token_hash"], digest)
+    ):
         raise _unauthorized("invalid node credential")
-    return row
+
+
+def _authenticate_node(
+    cur: psycopg.Cursor,
+    node_id: str,
+    digest: str,
+    *,
+    telemetry_only: bool = False,
+) -> dict:
+    credential = _node_credential(cur, node_id)
+    if credential or not telemetry_only:
+        _verify_node_credential(credential, digest)
+
+    cur.execute(
+        """
+        SELECT node_token_hash, accepts_work, inference_eligible,
+               render_eligible, blender_version, ollama_reachable, last_heartbeat_at
+        FROM provider_nodes WHERE node_id = %s FOR UPDATE
+        """,
+        (node_id,),
+    )
+    row = cur.fetchone()
+    if credential and row is None:
+        raise HTTPException(status_code=404, detail="node telemetry missing; register again")
+    if not credential:
+        legacy_digest = row["node_token_hash"] if row else None
+        if not legacy_digest or not secrets.compare_digest(legacy_digest, digest):
+            raise _unauthorized("invalid node credential")
+    return {
+        **row,
+        "issued_at": credential["issued_at"] if credential else None,
+        "provider_account_id": credential["provider_account_id"] if credential else None,
+    }
 
 
 @app.post("/providers/work/claim", response_model=JobClaimResponse)
@@ -1498,28 +1872,29 @@ def claim_work(
     strand every in-flight job in `claimed` forever with nothing raising, which
     is the failure mode this repository keeps designing away from.
     """
-    node = _authenticate_node(node_id, authorization)
-    now = _now()
-
-    # A node that is draining should not be given new work. It may still be
-    # finishing something it already holds, which is why this refuses new claims
-    # rather than cancelling the lease.
-    if not node["accepts_work"]:
-        return JobClaimResponse(job=None, poll_interval_s=claim_poll_interval_s())
-
-    lease_until = now + timedelta(seconds=job_lease_s())
+    digest = _bearer_digest(authorization)
+    interval = claim_poll_interval_s()
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
+                node = _authenticate_node(cur, node_id, digest)
+                now = _now()
+                if not (
+                    node["accepts_work"] and node["inference_eligible"] and node["ollama_reachable"]
+                    and liveness(node["last_heartbeat_at"], now, ttl()) == "online"
+                ):
+                    return JobClaimResponse(job=None, poll_interval_s=interval)
+                lease_until = now + timedelta(seconds=job_lease_s())
                 cur.execute(
                     """
                     UPDATE inference_jobs SET
                         status = 'claimed',
+                        provider_account_id = %s,
                         claimed_at = %s,
                         lease_expires_at = %s
                     WHERE job_id IN (
                         SELECT job_id FROM inference_jobs
-                        WHERE node_id = %s
+                        WHERE node_id = %s AND created_at >= %s
                           AND (
                                 status = 'queued'
                              OR (status = 'claimed' AND lease_expires_at < %s)
@@ -1530,7 +1905,7 @@ def claim_work(
                     )
                     RETURNING job_id, model, payload, lease_expires_at
                     """,
-                    (now, lease_until, node_id, now),
+                    (node["provider_account_id"], now, lease_until, node_id, node["issued_at"], now),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -1538,7 +1913,7 @@ def claim_work(
         raise _unavailable(exc) from exc
 
     if not row:
-        return JobClaimResponse(job=None, poll_interval_s=claim_poll_interval_s())
+        return JobClaimResponse(job=None, poll_interval_s=interval)
 
     return JobClaimResponse(
         job=JobOffer(
@@ -1547,7 +1922,7 @@ def claim_work(
             payload=JobPayload(**row["payload"]),
             lease_expires_at=row["lease_expires_at"],
         ),
-        poll_interval_s=claim_poll_interval_s(),
+        poll_interval_s=interval,
     )
 
 
@@ -1573,13 +1948,14 @@ def submit_work_result(
     agent/core/meter.py -- still NotImplementedError. Nothing here should be
     read as a settled figure.
     """
-    _authenticate_node(node_id, authorization)
+    digest = _bearer_digest(authorization)
     now = _now()
     terminal = "completed" if req.status == "completed" else "failed"
 
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
+                node = _authenticate_node(cur, node_id, digest)
                 cur.execute(
                     """
                     UPDATE inference_jobs SET
@@ -1593,7 +1969,7 @@ def submit_work_result(
                         completed_at = %s
                     WHERE job_id = %s
                       AND node_id = %s
-                      AND status = 'claimed'
+                      AND status = 'claimed' AND claimed_at >= %s
                     RETURNING request_id
                     """,
                     (
@@ -1607,6 +1983,7 @@ def submit_work_result(
                         now,
                         job_id,
                         node_id,
+                        node["issued_at"],
                     ),
                 )
                 row = cur.fetchone()
@@ -1662,10 +2039,12 @@ def _select_provider_for_model(model: str | None = None) -> dict:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT node_id, hostname, accepts_work, ollama_reachable,
+                    SELECT n.node_id, hostname, accepts_work, ollama_reachable,
                            local_models, registered_at, last_heartbeat_at
-                    FROM provider_nodes
-                    WHERE accepts_work = TRUE
+                    FROM provider_nodes n
+                    JOIN provider_node_credentials c ON c.node_id = n.node_id
+                    WHERE c.revoked_at IS NULL AND n.inference_eligible
+                      AND accepts_work = TRUE
                       AND ollama_reachable = TRUE
                       AND last_heartbeat_at IS NOT NULL
                     ORDER BY last_heartbeat_at DESC
@@ -2555,42 +2934,27 @@ def claim_render_frame(
     turns the account off. Re-reading it on every claim is what makes
     revocation take effect on the next frame instead of the next job.
     """
-    node = _authenticate_node(node_id, authorization)
-    now = _now()
+    digest = _bearer_digest(authorization)
     interval = claim_poll_interval_s()
-
-    if not node["accepts_work"]:
-        return RenderClaimResponse(frame=None, poll_interval_s=interval)
-
-    # Not merged into the SQL as another WHERE clause on purpose. A node that
-    # is not eligible must be answered without the queue being consulted at
-    # all, and a filter that silently returns no rows is much easier to delete
-    # by accident than a branch that returns early.
-    if not node.get("render_eligible"):
-        return RenderClaimResponse(frame=None, poll_interval_s=interval)
-
-    # A node that cannot say which Blender it has cannot be matched against a
-    # job's requested version, and rendering on the wrong version produces
-    # different pixels with nothing raising. No version, no work.
-    node_blender = node.get("blender_version")
-    if not node_blender:
-        return RenderClaimResponse(frame=None, poll_interval_s=interval)
-
-    # Before the claim, not after. A frame claimed against a bucket we cannot
-    # presign for is a frame leased to a node that never receives a URL: it sits
-    # unclaimable for the whole lease window and has already burnt an attempt,
-    # for a misconfiguration that had nothing to do with it.
-    bucket = _render_storage()
-    lease_until = now + timedelta(seconds=render_lease_s())
-
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
+                node = _authenticate_node(cur, node_id, digest)
+                now = _now()
+                node_blender = node["blender_version"]
+                if not (
+                    node["accepts_work"] and node["render_eligible"] and node_blender
+                    and liveness(node["last_heartbeat_at"], now, ttl()) == "online"
+                ):
+                    return RenderClaimResponse(frame=None, poll_interval_s=interval)
+                bucket = _render_storage()
+                lease_until = now + timedelta(seconds=render_lease_s())
                 cur.execute(
                     """
                     UPDATE render_frames SET
                         status = 'claimed',
                         node_id = %(node_id)s,
+                        provider_account_id = %(account)s,
                         claimed_at = %(now)s,
                         lease_expires_at = %(lease_until)s,
                         attempts = attempts + 1
@@ -2617,6 +2981,7 @@ def claim_render_frame(
                     """,
                     {
                         "node_id": node_id,
+                        "account": node["provider_account_id"],
                         "now": now,
                         "lease_until": lease_until,
                         "blender_series": _version_series(node_blender),
@@ -2756,7 +3121,7 @@ def submit_render_result(
     hand-built under ADR 0002, and agent/core/meter.py still raises
     NotImplementedError.
     """
-    _authenticate_node(node_id, authorization)
+    digest = _bearer_digest(authorization)
     now = _now()
     terminal = "completed" if req.status == "completed" else "failed"
     output_key = None
@@ -2767,6 +3132,7 @@ def submit_render_result(
         try:
             with db.connect() as conn:
                 with conn.cursor() as cur:
+                    _authenticate_node(cur, node_id, digest)
                     cur.execute(
                         """
                         SELECT f.job_id, f.frame_number, j.output_format
@@ -2815,6 +3181,7 @@ def submit_render_result(
     try:
         with db.connect() as conn:
             with conn.cursor() as cur:
+                node = _authenticate_node(cur, node_id, digest)
                 cur.execute(
                     """
                     UPDATE render_frames SET
@@ -2826,7 +3193,7 @@ def submit_render_result(
                         completed_at = %s
                     WHERE frame_id = %s
                       AND node_id = %s
-                      AND status = 'claimed'
+                      AND status = 'claimed' AND claimed_at >= %s
                     RETURNING frame_id
                     """,
                     (
@@ -2838,6 +3205,7 @@ def submit_render_result(
                         now,
                         frame_id,
                         node_id,
+                        node["issued_at"],
                     ),
                 )
                 row = cur.fetchone()

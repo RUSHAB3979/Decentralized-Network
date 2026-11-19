@@ -51,7 +51,7 @@ const MarketplaceDashboard = ({ onNavigate }) => (
             Create render job
             <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
           </button>
-          <button type="button" onClick={() => onNavigate('/app/provider')} className="inline-flex items-center gap-2 rounded-lg border border-white/[0.09] bg-white/[0.025] px-5 py-3 text-xs font-semibold text-slate-200 hover:bg-white/[0.05]">
+          <button type="button" onClick={() => onNavigate('/provider')} className="inline-flex items-center gap-2 rounded-lg border border-white/[0.09] bg-white/[0.025] px-5 py-3 text-xs font-semibold text-slate-200 hover:bg-white/[0.05]">
             <Server className="h-3.5 w-3.5" /> Provide a GPU
           </button>
         </div>

@@ -8,15 +8,9 @@ What it does: finds or starts Ollama, watches that it stays up, shows the
 node's status in the system tray with a control to stop accepting new work,
 and (M1) registers with the orchestrator and heartbeats its telemetry there.
 
-What it deliberately still does not do: leases, metering, or credentials.
-Those live in agent/core/, they are hand-built per ADR 0002, and they are not
-stubbed into the boot path here. The M1 heartbeat does not need them - it
-carries a public node id and no proof of identity, which is a decision written
-down in docs/adr/0004-m1-unauthenticated-heartbeat.md rather than an oversight.
-
 Threading: pywebview owns the main thread on Windows, so supervision and
-reporting run on workers. Nothing is shared between them except
-agent.state.ProviderState, which is the only object in the app with a lock.
+reporting run on workers. The reporter and job worker share the enrolment
+coordinator so a rejected credential is retired consistently.
 """
 
 from __future__ import annotations
@@ -81,6 +75,7 @@ def main() -> int:
     accepting = threading.Event()
     accepting.set()
     stop = threading.Event()
+    node_reporter = reporter.Reporter(state)
 
     # Named for what it does, not for what it is. The bare name `worker` used
     # to live here and now belongs to the agent.worker module imported above --
@@ -100,6 +95,7 @@ def main() -> int:
     telemetry_reporter = threading.Thread(
         target=reporter.run,
         args=(state, stop),
+        kwargs={"reporter": node_reporter},
         name="reporter",
         daemon=True,
     )
@@ -114,6 +110,7 @@ def main() -> int:
     job_worker = threading.Thread(
         target=worker.run,
         args=(state, supervisor, accepting, stop),
+        kwargs={"base_url": node_reporter.base_url, "enrolment": node_reporter.enrolment},
         name="worker",
         daemon=True,
     )
@@ -129,7 +126,7 @@ def main() -> int:
         else:
             state.set(Status.DRAINING, "not accepting new work")
 
-    dashboard = window.build(state, on_drain_change)
+    dashboard = window.build(state, on_drain_change, node_reporter.enrol)
 
     def on_quit() -> None:
         stop.set()

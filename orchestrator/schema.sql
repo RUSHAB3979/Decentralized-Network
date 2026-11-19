@@ -148,6 +148,74 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user_idx
     ON user_sessions (user_id, created_at DESC);
 
+-- Provider login is a separate account realm (ADR 0005).
+CREATE TABLE IF NOT EXISTS provider_accounts (
+    provider_account_id TEXT PRIMARY KEY,
+    email               TEXT        NOT NULL UNIQUE,
+    password_hash       TEXT        NOT NULL,
+    display_name        TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at       TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS provider_sessions (
+    session_id          TEXT PRIMARY KEY,
+    provider_account_id TEXT        NOT NULL REFERENCES provider_accounts(provider_account_id)
+                                         ON DELETE CASCADE,
+    token_hash          TEXT        NOT NULL UNIQUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked_at          TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS provider_sessions_account_idx
+    ON provider_sessions (provider_account_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS provider_enrolment_keys (
+    enrolment_key_id    TEXT PRIMARY KEY,
+    provider_account_id TEXT        NOT NULL REFERENCES provider_accounts(provider_account_id)
+                                         ON DELETE CASCADE,
+    key_prefix          TEXT        NOT NULL,
+    key_hash            TEXT        NOT NULL UNIQUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    redeemed_at         TIMESTAMPTZ,
+    revoked_at          TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS provider_enrolment_keys_account_idx
+    ON provider_enrolment_keys (provider_account_id, created_at DESC);
+
+-- Keep ownership and credentials outside the telemetry registry so a node can
+-- rebuild a missing telemetry row using its existing credential.
+CREATE TABLE IF NOT EXISTS provider_node_credentials (
+    node_id             TEXT PRIMARY KEY,
+    provider_account_id TEXT        NOT NULL REFERENCES provider_accounts(provider_account_id),
+    token_hash          TEXT        NOT NULL UNIQUE,
+    issued_at           TIMESTAMPTZ NOT NULL,
+    revoked_at          TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS provider_node_credentials_account_idx
+    ON provider_node_credentials (provider_account_id);
+
+CREATE TABLE IF NOT EXISTS provider_node_events (
+    event_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at        TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    node_id            TEXT        NOT NULL,
+    provider_account_id TEXT       NOT NULL,
+    actor_id           TEXT        NOT NULL,
+    event_type         TEXT        NOT NULL CHECK (event_type IN (
+        'inference_approved', 'inference_paused', 'node_credential_revoked'
+    ))
+);
+
+CREATE INDEX IF NOT EXISTS provider_node_events_node_idx
+    ON provider_node_events (node_id, occurred_at DESC, event_id DESC);
+
+ALTER TABLE provider_nodes
+    ADD COLUMN IF NOT EXISTS inference_eligible BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- ---------------------------------------------------------------------------
 -- Columns added to tables that already existed.
 --
@@ -511,3 +579,21 @@ CREATE INDEX IF NOT EXISTS render_frames_claimable_idx
 -- because every open browser tab polls it.
 CREATE INDEX IF NOT EXISTS render_frames_job_idx
     ON render_frames (job_id, frame_number);
+
+-- Record which provider actually claimed each unit. Older rows stay unassigned
+-- to an account because a node's present owner does not establish past ownership.
+ALTER TABLE inference_jobs
+    ADD COLUMN IF NOT EXISTS provider_account_id TEXT
+        REFERENCES provider_accounts(provider_account_id) ON DELETE SET NULL;
+
+ALTER TABLE render_frames
+    ADD COLUMN IF NOT EXISTS provider_account_id TEXT
+        REFERENCES provider_accounts(provider_account_id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS inference_jobs_provider_recent_idx
+    ON inference_jobs (provider_account_id, claimed_at DESC, job_id)
+    WHERE claimed_at IS NOT NULL AND provider_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS render_frames_provider_recent_idx
+    ON render_frames (provider_account_id, claimed_at DESC, frame_id)
+    WHERE claimed_at IS NOT NULL AND provider_account_id IS NOT NULL;

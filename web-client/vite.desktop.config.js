@@ -11,6 +11,7 @@ import react from '@vitejs/plugin-react';
 //    packages the exe from that tree.
 export default defineConfig({
   base: './',
+  publicDir: false,
   plugins: [react()],
   build: {
     rollupOptions: { input: 'desktop.html' },

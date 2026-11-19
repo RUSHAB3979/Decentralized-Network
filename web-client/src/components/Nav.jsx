@@ -5,7 +5,7 @@ const LINKS = [
     ['Products', '#features'],
     ['How it works', '#how'],
     ['Market', '#marketplace'],
-    ['Providers', '#marketplace'],
+    ['Providers', '#/provider'],
 ];
 const consoleUrl = import.meta.env.BASE_URL + '#/app';
 const Nav = () => {

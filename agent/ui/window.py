@@ -50,9 +50,15 @@ class Api:
     method the page can call.
     """
 
-    def __init__(self, state: ProviderState, on_accepting_change: Callable[[bool], None]):
+    def __init__(
+        self,
+        state: ProviderState,
+        on_accepting_change: Callable[[bool], None],
+        on_enrol: Callable[[str], str | None],
+    ):
         self._state = state
         self._on_accepting_change = on_accepting_change
+        self._on_enrol = on_enrol
 
     def snapshot(self) -> dict:
         return telemetry.to_dict(telemetry.snapshot(self._state))
@@ -61,16 +67,21 @@ class Api:
         self._on_accepting_change(bool(accepting))
         return self.snapshot()
 
+    def enrol(self, key: str) -> dict:
+        error = self._on_enrol(key)
+        return {"ok": error is None, "error": error}
+
 
 def build(
     state: ProviderState,
     on_accepting_change: Callable[[bool], None],
+    on_enrol: Callable[[str], str | None],
 ) -> webview.Window:
     """Create the dashboard window, hidden until asked for."""
     window = webview.create_window(
         "GPU Provider",
         str(_asset_root()),
-        js_api=Api(state, on_accepting_change),
+        js_api=Api(state, on_accepting_change, on_enrol),
         width=880,
         height=760,
         min_size=(720, 600),

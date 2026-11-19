@@ -73,16 +73,20 @@ export function clearToken() {
   }
 }
 
-async function authRequest(path, { method = 'POST', body, token } = {}) {
+export async function authRequest(
+  path,
+  { method = 'POST', body, token, baseUrl = AUTH_BASE_URL, signal } = {},
+) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let response;
   try {
-    response = await fetch(`${AUTH_BASE_URL}${path}`, {
+    response = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
   } catch (cause) {
     // fetch rejects with an identical TypeError for a host that is not there
@@ -92,7 +96,7 @@ async function authRequest(path, { method = 'POST', body, token } = {}) {
     // indistinguishable, so the message names all three rather than asserting
     // the one that happens to be most common.
     throw new AuthError(
-      `Cannot reach the orchestrator at ${AUTH_BASE_URL}. It may still be `
+      `Cannot reach the orchestrator at ${baseUrl}. It may still be `
       + `starting up (a free-tier backend can take ~50s to wake), not deployed `
       + `yet, or refusing this origin. Check the browser console for the `
       + `specific reason.`,

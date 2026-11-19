@@ -1,9 +1,10 @@
-# Runbook: orchestrator reachable, database down
+# Runbook for orchestrator health and scrape failures
 
 **Severity:** SEV-1 when sustained/customer-impacting
 
-**Trigger:** `GET /health` returns `503` with
-`{"status":"degraded","db":"down",...}` while the service still accepts TCP/HTTP
+Use this runbook for pilot alerts on Postgres probes, startup readiness or
+metrics collection. A database outage usually leaves `/service` reachable while
+`/health` returns `503` with `db: down`.
 
 **Expected provider symptom:** reachable but unhealthy `503`, retrying rather
 than destructive deregistration
@@ -17,16 +18,24 @@ network overhead.
 From an approved operator host, record UTC time and status only:
 
 ```bash
-curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}\n' https://ORCHESTRATOR/service
-curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}\n' https://ORCHESTRATOR/health
+curl --max-time 12 --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}\n' https://ORCHESTRATOR/service
+curl --max-time 12 --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}\n' https://ORCHESTRATOR/health
 ```
 
-- `/service` responds and `/health` is 503: this runbook; inspect database and
-  its network/credentials first.
-- both time out/refuse/connect-fail: the orchestrator or edge is unreachable;
-  inspect deployment, routing, DNS and load balancer first.
-- `/health` is 200: the original alert may have recovered; continue through
-  reconciliation before closing.
+- `MarketplaceDatabaseDown` fires while the scrape succeeds and Postgres probes
+  fail. If `/service` responds and `/health` reports `db: down`, inspect the
+  database, network and credentials first.
+- `MarketplaceOrchestratorNotReady` fires while the Postgres probe succeeds and
+  the startup schema check failed. Check the deployment startup log and schema
+  status. After resolving the cause, restart the affected orchestrator so it
+  retries schema application.
+- `MarketplacePilotMonitoringUnavailable` fires when the scrape target or either
+  expected gauge is missing. Check Prometheus Targets for HTTP status and the
+  last scrape error. Check the target address, route and scrape credential. If
+  both health endpoints time out, inspect the deployment, routing, DNS and load
+  balancer. An edge that removes unhealthy instances can make the scrape fail.
+- If `/health` is 200, the original alert may have recovered. Continue through
+  reconciliation and confirm the alert resolved before closing.
 
 Do not paste response headers, environment variables or connection URLs into
 the incident record.
@@ -82,8 +91,7 @@ Keep UTC timeline, status classes, aggregate counts, deploy IDs, database event
 IDs and corrective actions. Do not retain query results containing customer
 content. Write a postmortem for SEV-1 or any recurrence.
 
-**Rehearsal status (2026-08-20): not rehearsed in this workspace.** No Docker
-CLI is installed here, so the documented `marketplace_db` stop/recovery drill
-could not safely be performed. The next staging drill must stop only the
-database, confirm `/service` remains reachable, record actual `/health` latency,
-then execute this runbook and add a drill log.
+The 19 November 2026 local rehearsal stopped PostgreSQL while the orchestrator
+and scraper stayed reachable. Prometheus fired and resolved the database alert.
+The next staging rehearsal must confirm delivery to the named responder.
+[Local drill record](../sre/drills/2026-11-19-pilot-postgres-outage.md)

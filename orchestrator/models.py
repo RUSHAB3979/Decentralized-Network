@@ -111,6 +111,56 @@ class RegisterRequest(Strict):
     capability: Capability
 
 
+class EnrolmentKeyView(BaseModel):
+    enrolment_key_id: str
+    key_prefix: str
+    created_at: datetime
+    expires_at: datetime
+    redeemed_at: datetime | None
+    revoked_at: datetime | None
+
+
+class EnrolmentKeyCreated(EnrolmentKeyView):
+    key: str
+
+
+class OwnedNodeView(BaseModel):
+    node_id: str
+    hostname: str | None
+    last_heartbeat_at: datetime | None
+    accepts_work: bool
+    inference_eligible: bool
+    render_eligible: bool
+    revoked_at: datetime | None
+    liveness: str
+    gpu_name: str | None
+    vram_total_mb: int | None
+    gpu_utilisation_pct: int | None
+    temperature_c: int | None
+    ollama_reachable: bool
+
+
+class ProviderWorkView(BaseModel):
+    work_id: str
+    workload: Literal["inference", "render_frame"]
+    node_id: str
+    status: Literal["claimed", "completed", "failed", "lease_expired", "cancelled"]
+    claimed_at: datetime
+    completed_at: datetime | None
+
+
+class InferenceApprovalRequest(Strict):
+    provider_account_id: str = Field(pattern=r"^prv_[a-f0-9]{32}$")
+    approved: bool = Field(strict=True)
+
+
+class InferenceApprovalView(BaseModel):
+    node_id: str
+    provider_account_id: str
+    inference_eligible: bool
+    changed: bool
+
+
 class RegisterResponse(BaseModel):
     node_id: str
     registered_at: datetime
@@ -120,13 +170,7 @@ class RegisterResponse(BaseModel):
     # the whole fleet later without shipping a new desktop build.
     heartbeat_interval_s: int
 
-    # The node's transport credential, returned exactly once per registration
-    # and never readable again. The agent persists it and presents it when
-    # claiming work; the orchestrator keeps only a digest.
-    #
-    # Optional so that a newer agent talking to an orchestrator that predates
-    # this field does not fail to parse the response. An agent that gets None
-    # here simply cannot claim work, which is the honest degradation.
+    # Issued by enrolment. Authenticated registration only refreshes telemetry.
     node_token: str | None = None
 
 
@@ -342,6 +386,19 @@ class SessionCreated(BaseModel):
     token: str
     expires_at: datetime
     user: UserView
+
+
+class ProviderAccountView(BaseModel):
+    provider_account_id: str
+    email: str
+    display_name: str | None
+    created_at: datetime
+
+
+class ProviderSessionCreated(BaseModel):
+    token: str
+    expires_at: datetime
+    provider: ProviderAccountView
 
 
 # ---------------------------------------------------------------------------

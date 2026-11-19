@@ -38,6 +38,8 @@ const LINK_TONE = {
   online: ['text-emerald-300', 'Connected'],
   connecting: ['text-amber-300', 'Never connected'],
   offline: ['text-red-300', 'Lost contact'],
+  unenrolled: ['text-amber-300', 'Enrolment required'],
+  credential_error: ['text-red-300', 'Credential unavailable'],
 };
 
 const Card = ({ icon: Icon, title, accent = 'text-slate-500', children }) => (
@@ -76,6 +78,8 @@ const Bar = ({ used, total }) => {
 export default function DesktopApp() {
   const [data, setData] = useState(null);
   const [bridgeError, setBridgeError] = useState(null);
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrolmentError, setEnrolmentError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -108,6 +112,24 @@ export default function DesktopApp() {
     refresh();
   };
 
+  const enrol = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const key = new FormData(form).get('enrolment-key');
+    form.reset();
+    setEnrolling(true);
+    setEnrolmentError('');
+    try {
+      const result = await window.pywebview.api.enrol(key);
+      if (!result.ok) setEnrolmentError(result.error);
+      await refresh();
+    } catch {
+      setEnrolmentError('Could not complete enrolment. Generate a new key before retrying.');
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
   if (!data) {
     return (
       <div className="flex h-screen items-center justify-center gap-3 bg-[#08090a] text-slate-600">
@@ -120,6 +142,7 @@ export default function DesktopApp() {
   const { host, gpu, ollama, node, rentable, orchestrator } = data;
   const [linkAccent, linkLabel] = LINK_TONE[orchestrator.status] ?? LINK_TONE.connecting;
   const linked = orchestrator.status === 'online';
+  const needsEnrolment = ['unenrolled', 'credential_error'].includes(orchestrator.status);
   const [dot, text, border] = STATUS_TONE[node.status] ?? STATUS_TONE.stopped;
 
   return (
@@ -162,7 +185,7 @@ export default function DesktopApp() {
           marketplace looks identical to a working node from every other panel
           on this page - which is exactly how a provider spent an afternoon
           reporting into localhost while the tray showed green. */}
-      {!linked && (
+      {!linked && !needsEnrolment && (
         <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.03] p-4">
           <CloudOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
           <div className="min-w-0">
@@ -179,6 +202,39 @@ export default function DesktopApp() {
             </p>
           </div>
         </div>
+      )}
+
+      {needsEnrolment && (
+        <section className="mt-5 rounded-xl border border-amber-300/20 bg-amber-300/[0.03] p-5">
+          <h2 className="text-sm font-medium text-amber-100">Enrol this machine</h2>
+          <p className="mt-2 text-xs leading-5 text-slate-300">{orchestrator.detail}</p>
+          <form onSubmit={enrol} className="mt-4 space-y-2">
+            <label htmlFor="enrolment-key" className="block text-xs text-slate-300">
+              One-time enrolment key
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <input
+                id="enrolment-key"
+                name="enrolment-key"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                required
+                maxLength={128}
+                disabled={enrolling}
+                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/20 px-3 py-2 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={enrolling}
+                className="rounded-lg bg-amber-200 px-4 py-2 text-xs font-semibold text-slate-950 disabled:opacity-60"
+              >
+                {enrolling ? 'Enrolling…' : 'Enrol machine'}
+              </button>
+            </div>
+            {enrolmentError && <p role="alert" className="text-xs text-red-200">{enrolmentError}</p>}
+          </form>
+        </section>
       )}
 
       {/* Always rendered, healthy or not. A connection indicator that does not

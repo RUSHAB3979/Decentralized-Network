@@ -37,6 +37,8 @@ class Link(Enum):
     CONNECTING = "connecting"  # no successful exchange yet, this run
     ONLINE = "online"          # the orchestrator answered the last request
     OFFLINE = "offline"        # it answered before, and does not now
+    UNENROLLED = "unenrolled"
+    CREDENTIAL_ERROR = "credential_error"
 
 
 class Status(Enum):

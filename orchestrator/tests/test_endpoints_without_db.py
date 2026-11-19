@@ -53,10 +53,19 @@ def test_register_returns_503_not_500(client):
     # getting this wrong either hides a real defect or makes a transient
     # outage permanently deregister a node.
     response = client.post(
-        "/providers/register", json={"node_id": NODE_ID, "capability": CAPABILITY}
+        "/providers/register",
+        json={"node_id": NODE_ID, "capability": CAPABILITY},
+        headers={"Authorization": "Bearer enrolled-node-fixture"},
     )
     assert response.status_code == 503
     assert "unavailable" in response.json()["detail"]
+
+
+def test_register_refuses_to_issue_an_anonymous_credential(client):
+    response = client.post(
+        "/providers/register", json={"node_id": NODE_ID, "capability": CAPABILITY}
+    )
+    assert response.status_code == 401
 
 
 def test_heartbeat_returns_503_not_500(client):
@@ -459,3 +468,43 @@ def test_health_is_ok_only_when_the_schema_applied(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["schema"] == "ok"
+
+
+def test_metrics_are_opt_in_and_authenticate_before_probing(client, monkeypatch):
+    def unexpected_probe():
+        pytest.fail("an unauthorized scrape attempted a database connection")
+
+    monkeypatch.setattr(main.db, "connect", unexpected_probe)
+    monkeypatch.delenv("METRICS_BEARER_TOKEN", raising=False)
+    assert client.get("/metrics").status_code == 404
+
+    monkeypatch.setenv("METRICS_BEARER_TOKEN", "scrape-test-token")
+    assert client.get("/metrics").status_code == 401
+    rejected = client.get("/metrics", headers={"Authorization": "Bearer other-token"})
+    assert rejected.status_code == 401
+    assert rejected.headers["WWW-Authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize(
+    ("database_up", "schema_error", "health_status", "ready"),
+    [(True, None, 200, 1), (True, "BadSchema: internal details", 503, 0), (False, None, 503, 0)],
+)
+def test_metrics_distinguish_database_connectivity_from_readiness(
+    client, monkeypatch, database_up, schema_error, health_status, ready
+):
+    monkeypatch.setenv("METRICS_BEARER_TOKEN", "scrape-test-token")
+    monkeypatch.setattr(main, "_schema_error", schema_error)
+    if database_up:
+        monkeypatch.setattr(main.db, "connect", _FakeConn)
+
+    assert client.get("/health").status_code == health_status
+    response = client.get("/metrics", headers={"Authorization": "Bearer scrape-test-token"})
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/plain; version=0.0.4")
+    assert response.headers["Cache-Control"] == "no-store"
+    samples = [line for line in response.text.splitlines() if not line.startswith("#")]
+    assert samples == [
+        f'marketplace_dependency_up{{dependency="postgres"}} {int(database_up)}',
+        f"marketplace_orchestrator_ready {ready}",
+    ]

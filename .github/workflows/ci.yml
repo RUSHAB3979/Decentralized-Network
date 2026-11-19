@@ -527,6 +527,14 @@ jobs:
             --schema orchestrator/schema.sql \
             --baseline /tmp/baseline-schema.sql
 
+      - name: Install provider account test dependencies
+        run: pip install pytest==9.1.1 httpx2==2.0.0
+
+      - name: Exercise provider accounts against Postgres
+        env:
+          TEST_POSTGRES_DSN: postgresql://postgres:ci-placeholder-not-a-secret@localhost:5432/postgres
+        run: python -m pytest orchestrator/tests/test_provider_accounts.py
+
   # ---------------------------------------------------------------
   # 12. GATE — all checks must pass before merge
   # ---------------------------------------------------------------

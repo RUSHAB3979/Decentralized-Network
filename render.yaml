@@ -71,8 +71,8 @@ services:
           name: nodeforge-db
           property: connectionString
 
-      # The browser origins allowed to call this API. Both frontends are
-      # deployed: Vercel is the primary, GitHub Pages is the existing one.
+      # gpuorbit.dev is the primary browser origin. Keep the Vercel and
+      # GitHub Pages origins while those deployments are still supported.
       #
       # These must be the exact scheme and host. A trailing slash, or http://
       # where the site is https://, produces a CORS rejection that reads like
@@ -82,7 +82,7 @@ services:
       # Add Vercel preview URLs here too if you want branch deploys to work;
       # they get their own hostnames and will otherwise be refused.
       - key: CORS_ORIGINS
-        value: https://nodeforge-console.vercel.app,https://rushab3979.github.io
+        value: https://gpuorbit.dev,https://nodeforge-console.vercel.app,https://rushab3979.github.io
 
       # See .env.example for what each of these trades off.
       - key: HEARTBEAT_SEC

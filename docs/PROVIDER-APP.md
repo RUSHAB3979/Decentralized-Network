@@ -26,15 +26,52 @@ gaming PC. It does four things today:
 1. Finds or starts **Ollama**, the LLM inference runtime.
 2. Watches that Ollama stays up, and reports the node's status.
 3. Shows that status in a **system tray icon** and a **native desktop window**.
-4. **Registers with the orchestrator and heartbeats telemetry to it** (M1).
+4. **Enrols with a provider account, registers with the orchestrator, and sends telemetry.**
 
-What it deliberately does *not* do yet: authenticate, take a lease, or meter
-anything. The heartbeat carries no credential — see
-[ADR 0004](adr/0004-m1-unauthenticated-heartbeat.md) for exactly what that costs
-and the conditions under which it must stop. `agent/core/` is still three
-unimplemented interfaces. That absence is a decision, not an omission: the app
-runs and can be tested today, so the hand-built parts get written carefully
-rather than under pressure to make the thing start.
+### Enrolment on the development branch
+
+1. Open **Provider console** on the site, sign in to the provider account and
+   choose **Enrolment keys → Generate key**. API clients can use
+   `POST /v1/provider/enrolment-keys`. See the [API contract](API.md#machine-enrolment).
+2. On a controlled Windows machine, configure `ORCHESTRATOR_URL` for the matching
+   staging API. The desktop uses HTTPS for remote orchestrators and allows HTTP
+   for loopback development.
+3. Paste the key into **Enrol this machine**. The app sends it once and saves
+   only the returned node credential through `agent/core/creds.py`. The key
+   expires after 15 minutes. Generate a new key if the response is lost.
+4. Restart the app and verify it registers using the saved credential. An
+   authenticated `404` recovers missing telemetry using the same credential.
+   A `401` stops requests with that credential and returns the app to enrolment.
+5. Have the operator approve the node for the controlled workload. After a
+   synthetic completion, revoke the node from the provider account and verify
+   it stops claiming work.
+
+The Windows credential store interface is still a maintainer-owned stub under
+[ADR 0002](adr/0002-generated-vs-handbuilt.md). The desktop shows the store
+error and keeps the node out of the queue while the interface is unavailable.
+Tests exercise the flow with a simulated store. A packaged Windows test needs
+the store implementation and controlled GPU hardware.
+
+### Approve or pause pilot inference
+
+Run this from the repository root in the orchestrator environment. Use the
+provider account ID and machine ID displayed in the provider console. Use an
+existing operator-authorized customer account. The command prompts for its
+password.
+
+For a new staging environment, a database administrator can set
+`users.is_operator = TRUE` for the verified customer account's `user_id`.
+The same role can view private fleet telemetry.
+
+```text
+python -m orchestrator.provider_pilot approve MACHINE_ID --provider-account PROVIDER_ACCOUNT_ID --operator-email OPERATOR_EMAIL --url http://127.0.0.1:8080
+```
+
+Substitute the staging API's HTTPS URL for a remote pilot. Approval requires
+a fresh heartbeat sent with the current credential. Use `pause` with the same
+arguments to stop new inference claims. The node can finish work already
+claimed. To retire the credential, the provider uses **Machines → Revoke**.
+An operator can review each change in `provider_node_events`.
 
 The window is Edge **WebView2** rendering a React bundle loaded from disk over a
 `file://` URL. There is no HTTP server and no origin. This is why the executable

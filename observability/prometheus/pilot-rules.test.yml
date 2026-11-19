@@ -1,0 +1,98 @@
+rule_files:
+  - pilot-rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: Postgres outage pages after two minutes and resolves after recovery
+    interval: 15s
+    input_series:
+      - series: 'up{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '1+0x12'
+      - series: 'marketplace_dependency_up{job="gpuorbit-orchestrator",instance="pilot",dependency="postgres"}'
+        values: '1 0+0x8 1+0x2'
+      - series: 'marketplace_orchestrator_ready{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '1 0+0x8 1+0x2'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketplaceDatabaseDown
+      - eval_time: 2m15s
+        alertname: MarketplaceDatabaseDown
+        exp_alerts:
+          - exp_labels: {job: gpuorbit-orchestrator, instance: pilot, dependency: postgres, severity: sev1, owner: sre}
+            exp_annotations:
+              summary: The orchestrator is reachable but its database probe is failing
+              runbook: docs/runbooks/orchestrator-degraded.md
+      - eval_time: 2m15s
+        alertname: MarketplaceOrchestratorNotReady
+      - eval_time: 2m15s
+        alertname: MarketplacePilotMonitoringUnavailable
+      - eval_time: 2m30s
+        alertname: MarketplaceDatabaseDown
+
+  - name: Schema failure with working Postgres pages for readiness
+    interval: 15s
+    input_series:
+      - series: 'up{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '1+0x8'
+      - series: 'marketplace_dependency_up{job="gpuorbit-orchestrator",instance="pilot",dependency="postgres"}'
+        values: '1+0x8'
+      - series: 'marketplace_orchestrator_ready{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '0+0x8'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketplaceDatabaseDown
+      - eval_time: 2m
+        alertname: MarketplaceOrchestratorNotReady
+        exp_alerts:
+          - exp_labels: {job: gpuorbit-orchestrator, instance: pilot, severity: sev1, owner: sre}
+            exp_annotations:
+              summary: The schema failed to apply while Postgres is reachable
+              runbook: docs/runbooks/orchestrator-degraded.md
+
+  - name: Scrape failure with a stale database sample pages for monitoring
+    interval: 15s
+    input_series:
+      - series: 'up{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '0+0x8'
+      - series: 'marketplace_dependency_up{job="gpuorbit-orchestrator",instance="pilot",dependency="postgres"}'
+        values: '0'
+      - series: 'marketplace_orchestrator_ready{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketplaceDatabaseDown
+      - eval_time: 2m
+        alertname: MarketplacePilotMonitoringUnavailable
+        exp_alerts:
+          - exp_labels: {job: gpuorbit-orchestrator, instance: pilot, severity: sev1, owner: sre}
+            exp_annotations:
+              summary: The pilot target, scrape, or expected health metrics are missing
+              runbook: docs/runbooks/orchestrator-degraded.md
+
+  - name: Successful scrape with a missing gauge pages for monitoring
+    interval: 15s
+    input_series:
+      - series: 'up{job="gpuorbit-orchestrator",instance="pilot"}'
+        values: '1+0x8'
+      - series: 'marketplace_dependency_up{job="gpuorbit-orchestrator",instance="pilot",dependency="postgres"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketplacePilotMonitoringUnavailable
+        exp_alerts:
+          - exp_labels: {job: gpuorbit-orchestrator, instance: pilot, severity: sev1, owner: sre}
+            exp_annotations:
+              summary: The pilot target, scrape, or expected health metrics are missing
+              runbook: docs/runbooks/orchestrator-degraded.md
+
+  - name: Missing scrape target pages for monitoring
+    interval: 15s
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MarketplacePilotMonitoringUnavailable
+        exp_alerts:
+          - exp_labels: {job: gpuorbit-orchestrator, severity: sev1, owner: sre}
+            exp_annotations:
+              summary: The pilot target, scrape, or expected health metrics are missing
+              runbook: docs/runbooks/orchestrator-degraded.md

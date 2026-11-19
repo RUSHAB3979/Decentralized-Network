@@ -293,20 +293,6 @@ import inspect  # noqa: E402
 from orchestrator import main as _main  # noqa: E402
 
 
-def test_reregistering_a_node_drops_its_render_privilege():
-    """Registration is anonymous and rotates the token, so it must not inherit.
-
-    Live-verified before the fix: register a node_id that already exists, get a
-    fresh working node_token back, and claim a real frame carrying another
-    customer's source download and output upload URLs. Rotation is intended --
-    an agent registers on every start -- but the render permission is granted
-    by a human to one machine, so a fresh claim on that identity has to fall
-    back to the default the whole gate is built on.
-    """
-    sql = inspect.getsource(_main.register)
-    assert "render_eligible = FALSE" in sql
-
-
 def test_the_claim_re_reads_the_customers_half_of_the_gate():
     """Revocation has to stop the next frame, not just the next submission.
 

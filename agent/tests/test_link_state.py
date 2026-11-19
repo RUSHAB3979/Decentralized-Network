@@ -126,18 +126,17 @@ def _client(handler) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
-def test_a_successful_register_marks_the_link_online(monkeypatch):
+def test_a_successful_register_marks_the_link_online():
     state = ProviderState()
-    monkeypatch.setattr(reporter.identity, "store_node_token", lambda _t: True)
-    rep = reporter.Reporter(state, "http://orchestrator.invalid")
+    rep = reporter.Reporter(state, "https://orchestrator.invalid")
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer test-node-token"
         return httpx.Response(
             200,
             json={
                 "node_id": rep.node_id,
                 "heartbeat_interval_s": 15,
-                "node_token": "tok",
             },
         )
 
@@ -145,16 +144,15 @@ def test_a_successful_register_marks_the_link_online(monkeypatch):
         assert rep.register(client, sample()) is True
 
     assert state.link is Link.ONLINE
-    assert state.link_url == "http://orchestrator.invalid"
+    assert state.link_url == "https://orchestrator.invalid"
 
 
-def test_the_url_is_visible_even_when_the_link_is_healthy(monkeypatch):
+def test_the_url_is_visible_even_when_the_link_is_healthy():
     # The regression guard for the 2026-08-15 incident. A green light that does
     # not say WHERE it is green is what let a node report happily into
     # localhost for hours. The address has to be on the surface at all times,
     # not only in an error message.
     state = ProviderState()
-    monkeypatch.setattr(reporter.identity, "store_node_token", lambda _t: True)
     rep = reporter.Reporter(state, reporter.DEFAULT_ORCHESTRATOR)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -174,7 +172,7 @@ def test_the_url_is_visible_even_when_the_link_is_healthy(monkeypatch):
 
 def test_a_successful_heartbeat_marks_the_link_online():
     state = ProviderState()
-    rep = reporter.Reporter(state, "http://orchestrator.invalid")
+    rep = reporter.Reporter(state, "https://orchestrator.invalid")
     rep.registered = True
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -199,7 +197,7 @@ def test_a_successful_heartbeat_marks_the_link_online():
 )
 def test_failures_distinguish_never_reached_from_lost_contact(ever_connected, expected):
     state = ProviderState()
-    rep = reporter.Reporter(state, "http://orchestrator.invalid")
+    rep = reporter.Reporter(state, "https://orchestrator.invalid")
     rep.ever_connected = ever_connected
 
     rep.record_failure("ConnectError: connection refused")
@@ -230,7 +228,7 @@ def test_the_loop_reports_an_unreachable_orchestrator_to_the_ui(monkeypatch):
 
     thread = threading.Thread(
         target=reporter.run,
-        args=(state, stop, "http://orchestrator.invalid"),
+        args=(state, stop, "https://orchestrator.invalid"),
         daemon=True,
     )
     thread.start()
@@ -238,7 +236,7 @@ def test_the_loop_reports_an_unreachable_orchestrator_to_the_ui(monkeypatch):
 
     assert not thread.is_alive()
     assert state.link is Link.CONNECTING
-    assert state.link_url == "http://orchestrator.invalid"
+    assert state.link_url == "https://orchestrator.invalid"
     assert "ConnectError" in state.link_detail
 
 

@@ -101,14 +101,14 @@ const SetupTab = ({ gatewayReady, provider, apiKey, models, onOpenKeys }) => (
 );
 
 const ApiKeysTab = ({ keys, apiKey, onUseKey, onCreate, onRevoke, busy, error }) => {
-  const [newKeyName, setNewKeyName] = useState('Shubh local demo');
+  const [newKeyName, setNewKeyName] = useState('My API key');
   const [pastedKey, setPastedKey] = useState('');
   const [visible, setVisible] = useState(true);
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="rounded-xl border border-white/[0.07] bg-white/[0.018]">
         <div className="border-b border-white/[0.06] p-5 sm:flex sm:items-end sm:justify-between sm:gap-4">
-          <div><h2 className="text-sm font-medium text-slate-200">Real local API keys</h2><p className="mt-1 text-[11px] text-slate-600">The backend stores only a prefix and SHA-256 hash. A secret is shown once.</p></div>
+          <div><h2 className="text-sm font-medium text-slate-200">Your API keys</h2><p className="mt-1 text-[11px] text-slate-600">The backend stores only a prefix and SHA-256 hash. A secret is shown once.</p></div>
           <div className="mt-4 flex gap-2 sm:mt-0"><input value={newKeyName} onChange={(event) => setNewKeyName(event.target.value)} aria-label="New API key name" className="min-w-0 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2.5 text-xs text-slate-300 outline-hidden focus:border-violet-300/30" /><button type="button" disabled={busy || !newKeyName.trim()} onClick={() => onCreate(newKeyName.trim())} className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-slate-100 px-4 py-2.5 text-xs font-semibold text-[#08090a] disabled:opacity-40"><Plus className="h-3.5 w-3.5" /> Create</button></div>
         </div>
 
@@ -119,7 +119,7 @@ const ApiKeysTab = ({ keys, apiKey, onUseKey, onCreate, onRevoke, busy, error })
 
         {keys.length ? <div className="divide-y divide-white/[0.05]">{keys.map((key) => <div key={key.id} className="grid gap-4 p-5 sm:grid-cols-[minmax(0,1fr)_150px_150px_auto] sm:items-center"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg border border-violet-300/15 bg-violet-300/[0.04] text-violet-300"><KeyRound className="h-4 w-4" /></span><div><p className="text-xs text-slate-300">{key.name}</p><p className="mt-1 font-mono text-[9px] text-slate-700">{key.key_prefix}...</p></div></div><div><p className="font-mono text-[8px] uppercase tracking-[0.14em] text-slate-700">Created</p><p className="mt-1 text-[10px] text-slate-500">{formatDate(key.created_at)}</p></div><div><p className="font-mono text-[8px] uppercase tracking-[0.14em] text-slate-700">Last used</p><p className="mt-1 text-[10px] text-slate-500">{formatDate(key.last_used_at)}</p></div><button type="button" aria-label={`Revoke ${key.name}`} onClick={() => onRevoke(key.id)} className="rounded-lg border border-white/[0.07] p-2 text-slate-700 hover:border-red-300/20 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div> : <div className="p-8 text-center text-[11px] text-slate-600">No active keys yet.</div>}
       </section>
-      <aside className="space-y-4"><div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.025] p-5"><ShieldCheck className="h-5 w-5 text-emerald-300" /><h3 className="mt-4 text-sm text-slate-200">Key stops at the gateway</h3><p className="mt-2 text-[11px] leading-5 text-slate-600">Your provider receives the prompt and model request, never the reusable customer key.</p></div><div className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5"><LockKeyhole className="h-5 w-5 text-violet-300" /><p className="mt-4 text-[11px] leading-5 text-slate-600">Key creation is deliberately restricted to requests originating from this PC while <span className="font-mono text-slate-400">LOCAL_DEMO_MODE=true</span>.</p></div></aside>
+      <aside className="space-y-4"><div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.025] p-5"><ShieldCheck className="h-5 w-5 text-emerald-300" /><h3 className="mt-4 text-sm text-slate-200">Key stops at the gateway</h3><p className="mt-2 text-[11px] leading-5 text-slate-600">Your provider receives the prompt and model request, never the reusable customer key.</p></div><div className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-5"><LockKeyhole className="h-5 w-5 text-violet-300" /><p className="mt-4 text-[11px] leading-5 text-slate-600">Sign in to create and revoke API keys for your customer account.</p></div></aside>
     </div>
   );
 };

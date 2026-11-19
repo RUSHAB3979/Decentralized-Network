@@ -24,6 +24,9 @@ const CTA = () => (<section id="cta" className="relative overflow-hidden">
           Open the console
           <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>
         </a>
+        <a href="#/provider" className="btn-quiet" data-mag>
+          Provider console
+        </a>
         <a href="#marketplace" className="btn-quiet" data-mag>
           See capacity preview
         </a>
