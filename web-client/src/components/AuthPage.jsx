@@ -17,7 +17,7 @@ const AuthPage = ({ initialMode }) => {
     const [showPassword, setShowPassword] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const { status, user, signup, login } = useSession();
+    const { status, signup, login } = useSession();
     const isSignup = mode === 'signup';
 
     // Somebody who is already signed in has no business on this page. Sending
@@ -144,10 +144,7 @@ const AuthPage = ({ initialMode }) => {
                 {isSignup && (<label className="auth-field"><span>Display name</span><div><User className="h-4 w-4"/><input name="name" autoComplete="name" required placeholder="Your name"/></div></label>)}
                 <label className="auth-field"><span>Email address</span><div><Mail className="h-4 w-4"/><input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></div></label>
                 <label className="auth-field">
-                  <span className="flex items-center justify-between">
-                    Password
-                    {!isSignup && <a href="#forgot" className="normal-case tracking-normal text-indigo-300 transition-colors hover:text-cyan-200">Forgot password?</a>}
-                  </span>
+                  <span>Password</span>
                   <div>
                     <LockKeyhole className="h-4 w-4"/>
                     <input name="password" type={showPassword ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} required minLength={isSignup ? 10 : 1} placeholder={isSignup ? 'At least 10 characters' : 'Enter your password'}/>
@@ -175,11 +172,8 @@ const AuthPage = ({ initialMode }) => {
                   {isSignup ? 'Sign in' : 'Create an account'}
                 </button>
               </p>
+              {!isSignup && <p className="mt-2 text-center text-xs text-slate-400">Need a password reset? Contact your pilot administrator.</p>}
             </div>
-          </div>
-          <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[9px] uppercase tracking-[0.24em] text-slate-600">
-            <span className={'h-1.5 w-1.5 rounded-full ' + (status === 'error' ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,.8)]' : 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.8)]')}/>
-            {status === 'error' ? 'Orchestrator unreachable' : 'Connected to orchestrator'}
           </div>
         </section>
       </main>
