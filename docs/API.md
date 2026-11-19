@@ -71,15 +71,46 @@ Revokes a key the calling account owns. `404` for a key belonging to somebody
 else -- deliberately the same response as a key that does not exist, so the
 endpoint cannot be used to probe for other people's key ids.
 
-## Provider Work Queue
+## Provider account sessions
 
-Agent-facing. Authenticated with the node credential returned once by
-`POST /providers/register`.
+Provider logins are separate from customer logins. All paths below use the
+`/v1/provider/auth` prefix.
 
-Scope note: that credential authenticates the transport and nothing more. Secure
-storage on the provider's machine, rotation, and binding the credential to the
-hardware are `agent/core/creds.py`'s job -- hand-built under ADR 0002 and still
-unwritten. The agent currently keeps the token in a plaintext file.
+| Method | Path | Result |
+|---|---|---|
+| POST | `/signup` | `201` with a new provider session, or `403` when signup is closed |
+| POST | `/login` | `200` with a provider session for valid credentials |
+| GET | `/me` | `200` with the profile for the provider bearer token |
+| POST | `/logout` | `204` after revoking the provider bearer token |
+
+Signup takes `email`, `password` and optional `display_name`. Login takes
+`email` and `password`. Both return `token`, `expires_at` and `provider`.
+Use `python -m orchestrator.seed_users --provider provider@example.com` to
+provision a provider account when `SIGNUPS_OPEN=false`.
+## Machine enrolment
+
+| Method | Path | Credential and result |
+|---|---|---|
+| POST | `/v1/provider/enrolment-keys` | Provider session. Returns `201` with a one-time key valid for 15 minutes. |
+| GET | `/v1/provider/enrolment-keys` | Provider session. Lists key prefixes and lifecycle timestamps for the account. |
+| DELETE | `/v1/provider/enrolment-keys/{key_id}` | Provider session. Revokes an owned key. |
+| POST | `/providers/enrol` | Enrolment key as a bearer header. Returns `201` with a node credential. |
+| POST | `/providers/register` | Current node credential as a bearer header. Refreshes or reconstructs telemetry and returns `200`. |
+| GET | `/v1/provider/nodes` | Provider session. Lists only the account's machines and their eligibility and revocation states. |
+| DELETE | `/v1/provider/nodes/{node_id}` | Provider session. Revokes the machine credential and clears both work permissions. |
+
+Both machine endpoints take the same body with `node_id` and `capability`.
+If heartbeat returns `404` for an authenticated node, send `/providers/register`
+with its current credential and retry the heartbeat. A `401` requires an owner
+to issue a new enrolment key. A lost enrolment response also needs a new key.
+A fresh enrolment clears work approval. An operator must explicitly approve
+the node for inference or the owner-controlled render pilot. See the
+[schema and rollout notes](schema/provider-accounts.md).
+
+## Provider work queue
+
+Inference and frame claims require a current node credential, a fresh
+heartbeat, and operator approval for the workload.
 
 ### `POST /providers/work/claim?node_id=...`
 

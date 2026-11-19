@@ -1,6 +1,7 @@
 """Create accounts by hand, for a deployment whose signup door is shut.
 
     python -m orchestrator.seed_users alice@example.com bob@example.com
+    python -m orchestrator.seed_users --provider provider@example.com
 
 Prints one email/password pair per account and then forgets them. There is no
 way to ask for them again, because nothing here stores a password anywhere: the
@@ -33,6 +34,7 @@ import sys
 from uuid import uuid4
 
 import psycopg
+from psycopg import sql
 
 from orchestrator import auth, db
 
@@ -47,7 +49,7 @@ def generate_password() -> str:
     return secrets.token_urlsafe(PASSWORD_BYTES)
 
 
-def seed(email: str, *, reset: bool) -> tuple[str, str] | None:
+def seed(email: str, *, reset: bool, provider: bool = False) -> tuple[str, str] | None:
     """Create or rotate one account. Returns (email, password), or None.
 
     None means the address already had an account and --reset was not given.
@@ -58,18 +60,21 @@ def seed(email: str, *, reset: bool) -> tuple[str, str] | None:
     normalised = auth.normalise_email(email)
     password = generate_password()
     password_hash = auth.hash_password(password)
+    table = sql.Identifier("provider_accounts" if provider else "users")
+    id_column = sql.Identifier("provider_account_id" if provider else "user_id")
+    id_prefix = "prv" if provider else "usr"
 
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                INSERT INTO users (user_id, email, password_hash, display_name)
+                sql.SQL("""
+                INSERT INTO {table} ({id_column}, email, password_hash, display_name)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (email) DO NOTHING
-                RETURNING user_id
-                """,
+                RETURNING {id_column}
+                """).format(table=table, id_column=id_column),
                 (
-                    f"usr_{uuid4().hex}",
+                    f"{id_prefix}_{uuid4().hex}",
                     normalised,
                     password_hash,
                     normalised.split("@", 1)[0],
@@ -79,7 +84,7 @@ def seed(email: str, *, reset: bool) -> tuple[str, str] | None:
 
             if not created and reset:
                 cur.execute(
-                    "UPDATE users SET password_hash = %s WHERE email = %s",
+                    sql.SQL("UPDATE {} SET password_hash = %s WHERE email = %s").format(table),
                     (password_hash, normalised),
                 )
                 # Every existing session keeps working after a password change,
@@ -102,6 +107,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("emails", nargs="+", help="one or more email addresses")
     parser.add_argument(
+        "--provider",
+        action="store_true",
+        help="seed accounts in the provider console realm",
+    )
+    parser.add_argument(
         "--reset",
         action="store_true",
         help="rotate the password if the address already has an account",
@@ -109,7 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        results = [(email, seed(email, reset=args.reset)) for email in args.emails]
+        results = [
+            (email, seed(email, reset=args.reset, provider=args.provider)) for email in args.emails
+        ]
     except db.NotConfigured as exc:
         # Distinct from a connection failure, and the distinction matters:
         # this one is fixed by setting a variable, not by starting Postgres.

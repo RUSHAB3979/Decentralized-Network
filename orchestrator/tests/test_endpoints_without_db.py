@@ -53,10 +53,19 @@ def test_register_returns_503_not_500(client):
     # getting this wrong either hides a real defect or makes a transient
     # outage permanently deregister a node.
     response = client.post(
-        "/providers/register", json={"node_id": NODE_ID, "capability": CAPABILITY}
+        "/providers/register",
+        json={"node_id": NODE_ID, "capability": CAPABILITY},
+        headers={"Authorization": "Bearer enrolled-node-fixture"},
     )
     assert response.status_code == 503
     assert "unavailable" in response.json()["detail"]
+
+
+def test_register_refuses_to_issue_an_anonymous_credential(client):
+    response = client.post(
+        "/providers/register", json={"node_id": NODE_ID, "capability": CAPABILITY}
+    )
+    assert response.status_code == 401
 
 
 def test_heartbeat_returns_503_not_500(client):
