@@ -132,6 +132,33 @@ class OwnedNodeView(BaseModel):
     inference_eligible: bool
     render_eligible: bool
     revoked_at: datetime | None
+    liveness: str
+    gpu_name: str | None
+    vram_total_mb: int | None
+    gpu_utilisation_pct: int | None
+    temperature_c: int | None
+    ollama_reachable: bool
+
+
+class ProviderWorkView(BaseModel):
+    work_id: str
+    workload: Literal["inference", "render_frame"]
+    node_id: str
+    status: Literal["claimed", "completed", "failed", "lease_expired", "cancelled"]
+    claimed_at: datetime
+    completed_at: datetime | None
+
+
+class InferenceApprovalRequest(Strict):
+    provider_account_id: str = Field(pattern=r"^prv_[a-f0-9]{32}$")
+    approved: bool = Field(strict=True)
+
+
+class InferenceApprovalView(BaseModel):
+    node_id: str
+    provider_account_id: str
+    inference_eligible: bool
+    changed: bool
 
 
 class RegisterResponse(BaseModel):

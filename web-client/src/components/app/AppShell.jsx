@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 ];
 
 const ACCOUNT_ITEMS = [
-  { label: 'Provider console', route: '/app/provider', icon: Server },
+  { label: 'Provider console', route: '/provider', icon: Server },
   { label: 'Usage & billing', route: '/app/billing', icon: WalletCards },
 ];
 

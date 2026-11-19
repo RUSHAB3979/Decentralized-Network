@@ -28,6 +28,6 @@ Registration refreshes telemetry with the current node credential. The old token
 ## Rollout
 
 1. Test the schema upgrade against the previous database, then test enrolment, reboot, revocation and re-enrolment with the replacement Windows build on staging.
-2. The current released Windows agent still calls anonymous registration on startup. Coordinate the API and agent cutover after the desktop can send the node credential on registration and use the OS-backed credential store. ADR 0002 reserves the credential store and lifecycle for the maintainer.
-3. Approve inference only for the controlled pilot machine after verifying its owner and credential. An operator sets `provider_nodes.inference_eligible` for the specific node. Existing rendering approval remains a separate operator decision for owner-controlled hardware.
+2. The current released Windows agent still calls anonymous registration on startup. The development desktop sends an authenticated registration and uses the OS-backed credential interface. Coordinate the API and agent cutover after the maintainer implements the store under ADR 0002 and verifies the packaged build on Windows.
+3. Approve inference only for the controlled pilot machine after verifying its owner. Use the [pilot operator command](../PROVIDER-APP.md#approve-or-pause-pilot-inference). Rendering approval remains a separate operator decision for owner-controlled hardware.
 4. When recovering from an older backup, reconcile revocation and approval changes before opening the queue. If a credential row is absent from the backup, issue a fresh enrolment key from the owning account. Ownership transfers and duplicated machine IDs require operator reconciliation.

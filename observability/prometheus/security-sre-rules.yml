@@ -65,16 +65,6 @@ groups:
   - name: marketplace-reliability
     interval: 30s
     rules:
-      - alert: MarketplaceDatabaseDown
-        expr: marketplace_dependency_up{dependency="postgres"} == 0
-        for: 2m
-        labels:
-          severity: sev1
-          owner: sre
-        annotations:
-          summary: The orchestrator is reachable but its database is down
-          runbook: docs/runbooks/orchestrator-degraded.md
-
       - alert: MarketplaceHeartbeatFreshnessLow
         expr: marketplace_provider_heartbeat_fresh_ratio < 0.99
         for: 10m

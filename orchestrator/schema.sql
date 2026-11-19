@@ -199,6 +199,20 @@ CREATE TABLE IF NOT EXISTS provider_node_credentials (
 CREATE INDEX IF NOT EXISTS provider_node_credentials_account_idx
     ON provider_node_credentials (provider_account_id);
 
+CREATE TABLE IF NOT EXISTS provider_node_events (
+    event_id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    occurred_at        TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    node_id            TEXT        NOT NULL,
+    provider_account_id TEXT       NOT NULL,
+    actor_id           TEXT        NOT NULL,
+    event_type         TEXT        NOT NULL CHECK (event_type IN (
+        'inference_approved', 'inference_paused', 'node_credential_revoked'
+    ))
+);
+
+CREATE INDEX IF NOT EXISTS provider_node_events_node_idx
+    ON provider_node_events (node_id, occurred_at DESC, event_id DESC);
+
 ALTER TABLE provider_nodes
     ADD COLUMN IF NOT EXISTS inference_eligible BOOLEAN NOT NULL DEFAULT FALSE;
 
@@ -565,3 +579,21 @@ CREATE INDEX IF NOT EXISTS render_frames_claimable_idx
 -- because every open browser tab polls it.
 CREATE INDEX IF NOT EXISTS render_frames_job_idx
     ON render_frames (job_id, frame_number);
+
+-- Record which provider actually claimed each unit. Older rows stay unassigned
+-- to an account because a node's present owner does not establish past ownership.
+ALTER TABLE inference_jobs
+    ADD COLUMN IF NOT EXISTS provider_account_id TEXT
+        REFERENCES provider_accounts(provider_account_id) ON DELETE SET NULL;
+
+ALTER TABLE render_frames
+    ADD COLUMN IF NOT EXISTS provider_account_id TEXT
+        REFERENCES provider_accounts(provider_account_id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS inference_jobs_provider_recent_idx
+    ON inference_jobs (provider_account_id, claimed_at DESC, job_id)
+    WHERE claimed_at IS NOT NULL AND provider_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS render_frames_provider_recent_idx
+    ON render_frames (provider_account_id, claimed_at DESC, frame_id)
+    WHERE claimed_at IS NOT NULL AND provider_account_id IS NOT NULL;

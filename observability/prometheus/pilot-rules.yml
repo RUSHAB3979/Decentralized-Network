@@ -1,0 +1,47 @@
+groups:
+  - name: gpuorbit-pilot
+    interval: 15s
+    rules:
+      - alert: MarketplaceDatabaseDown
+        expr: |
+          (marketplace_dependency_up{job="gpuorbit-orchestrator", dependency="postgres"} == 0)
+          and on (job, instance) (up{job="gpuorbit-orchestrator"} == 1)
+        for: 2m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: The orchestrator is reachable but its database probe is failing
+          runbook: docs/runbooks/orchestrator-degraded.md
+
+      - alert: MarketplaceOrchestratorNotReady
+        expr: |
+          (marketplace_orchestrator_ready{job="gpuorbit-orchestrator"} == 0)
+          and on (job, instance) (marketplace_dependency_up{job="gpuorbit-orchestrator", dependency="postgres"} == 1)
+          and on (job, instance) (up{job="gpuorbit-orchestrator"} == 1)
+        for: 2m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: The schema failed to apply while Postgres is reachable
+          runbook: docs/runbooks/orchestrator-degraded.md
+
+      - alert: MarketplacePilotMonitoringUnavailable
+        expr: |
+          absent(up{job="gpuorbit-orchestrator"})
+          or (up{job="gpuorbit-orchestrator"} == 0)
+          or (
+            up{job="gpuorbit-orchestrator"}
+            unless on (job, instance) (
+              marketplace_dependency_up{job="gpuorbit-orchestrator", dependency="postgres"}
+              and on (job, instance) marketplace_orchestrator_ready{job="gpuorbit-orchestrator"}
+            )
+          )
+        for: 2m
+        labels:
+          severity: sev1
+          owner: sre
+        annotations:
+          summary: The pilot target, scrape, or expected health metrics are missing
+          runbook: docs/runbooks/orchestrator-degraded.md

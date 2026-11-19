@@ -4,8 +4,9 @@
 
 **Initial measurement window:** 28 rolling days
 
-**Status:** objectives and alert rules defined; application metric emission and
-dashboard deployment require the cross-team instrumentation handoff.
+**Status** — Pilot database and readiness metrics, alert rules and dashboard
+are available for staging. Hosted monitoring, responder routing and the rest
+of the metrics contract require the cross-team instrumentation handoff.
 
 ## Safety invariants
 
@@ -45,6 +46,7 @@ Names below are the required interface for the provided Prometheus rules.
 | Metric | Type | Allowed labels |
 |---|---|---|
 | `marketplace_dependency_up` | gauge | `dependency` from bounded enum |
+| `marketplace_orchestrator_ready` | gauge | none |
 | `marketplace_http_requests_total` | counter | route template, method, status class |
 | `marketplace_http_request_duration_seconds` | histogram | route template, method |
 | `marketplace_provider_heartbeat_fresh_ratio` | gauge | coarse provider pool only |
@@ -69,14 +71,16 @@ access-controlled structured events with bounded retention.
 
 ## Alert policy
 
-The deployable rule definitions are in
-`observability/prometheus/security-sre-rules.yml`. Alert routing must use:
+The pilot rules cover database probe failure, schema startup failure and loss
+of telemetry. The remaining rules require the full metrics contract.
+[Monitoring setup](../../observability/README.md)
 
 - **Page immediately:** sandbox escape/canary recovery, unsandboxed admission,
   cleanup pending over 60 seconds, cleanup failure, leaked telemetry secret,
   or inability to quarantine.
-- **Page after sustained impact:** database down for 2 minutes, control-plane
-  fast burn, heartbeat-freshness below 99% for 10 minutes.
+- **Page after sustained impact:** database probe failure, failed readiness
+  with reachable Postgres or missing pilot telemetry for 2 minutes;
+  control-plane fast burn; heartbeat freshness below 99% for 10 minutes.
 - **Ticket/business hours:** slow burn, capacity exhaustion trends, denied
   egress with no successful flow, audit staleness before eligibility expires.
 

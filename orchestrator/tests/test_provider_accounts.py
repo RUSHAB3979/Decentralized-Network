@@ -6,6 +6,7 @@ import os
 from time import monotonic, sleep
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from types import SimpleNamespace
 from uuid import uuid4
 
 import psycopg
@@ -21,6 +22,7 @@ PROVIDER_AUTH = "/v1/provider/auth"
 ACCOUNT = {"email": "  Pilot@Example.test  ", "password": "pilot-fixture-password"}
 KEYS = "/v1/provider/enrolment-keys"
 NODES = "/v1/provider/nodes"
+JOBS = "/v1/provider/jobs"
 NODE = {"node_id": "pilot-node-001", "capability": {"hostname": "PILOT"}}
 OTHER_NODE = {**NODE, "node_id": "pilot-node-002"}
 HEARTBEAT = {
@@ -29,6 +31,7 @@ HEARTBEAT = {
     "accepts_work": True,
     "metrics": {"ollama_reachable": True, "local_models": ["fixture:model"]},
 }
+APPROVAL = f"/v1/operator/providers/nodes/{NODE['node_id']}/inference-approval"
 
 
 @pytest.fixture
@@ -204,6 +207,9 @@ def test_node_ownership_and_registration_recovery(client):
     with db.connect() as conn:
         conn.execute("DELETE FROM provider_nodes WHERE node_id = %s", (NODE["node_id"],))
     assert client.post("/providers/heartbeat", json=HEARTBEAT, headers=token).status_code == 404
+    assert client.post(
+        "/providers/work/claim", params={"node_id": NODE["node_id"]}, headers=token,
+    ).status_code == 404
     response = client.post("/providers/register", json=NODE, headers=token)
     assert response.status_code == 200
     assert "node_token" not in response.json()
@@ -269,6 +275,12 @@ def test_approved_node_claims_and_returns_work_until_revoked(client, monkeypatch
             if job is None:
                 sleep(0.03)
         assert job is not None
+        running = client.get(JOBS, headers=owner).json()
+        assert len(running) == 1
+        assert running[0]["status"] == "claimed"
+        assert set(running[0]) == {
+            "work_id", "workload", "node_id", "status", "claimed_at", "completed_at",
+        }
         result = client.post(
             f"/providers/work/{job['job_id']}/result", params=params, headers=token,
             json={"status": "completed", "content": "synthetic answer"},
@@ -277,6 +289,14 @@ def test_approved_node_claims_and_returns_work_until_revoked(client, monkeypatch
         completion = pending.result(timeout=5)
     assert completion.status_code == 200
     assert completion.json()["choices"][0]["message"]["content"] == "synthetic answer"
+    finished = client.get(JOBS, headers=owner)
+    assert finished.status_code == 200
+    assert finished.json()[0]["work_id"] == job["job_id"]
+    assert finished.json()[0]["status"] == "completed"
+    assert "synthetic answer" not in finished.text
+    assert client.get(JOBS, headers=other).json() == []
+    assert client.get(JOBS, headers=token).status_code == 401
+    assert client.get(JOBS, headers=bearer(customer.json()["token"])).status_code == 401
     assert client.delete(revoke_url, headers=other).status_code == 404
     assert client.delete(revoke_url, headers=owner).status_code == 204
     assert client.delete(revoke_url, headers=owner).status_code == 204
@@ -293,3 +313,149 @@ def test_approved_node_claims_and_returns_work_until_revoked(client, monkeypatch
     assert recovered["revoked_at"] is None
     assert recovered["inference_eligible"] is recovered["render_eligible"] is False
     assert client.post("/providers/work/claim", params=params, headers=token).status_code == 401
+    assert client.get(JOBS, headers=owner).json() == finished.json()
+
+
+def test_provider_jobs_follow_the_current_render_claim(client, monkeypatch):
+    owner = provider_headers(client)
+    other = provider_headers(client, "other@example.test")
+    first = enrol(client, mint_key(client, owner), NODE)
+    second = enrol(client, mint_key(client, other), OTHER_NODE)
+    assert first.status_code == second.status_code == 201
+    customer = client.post("/v1/auth/signup", json={**ACCOUNT, "email": "renderer@example.test"})
+    assert customer.status_code == 201
+    user_id = customer.json()["user"]["user_id"]
+    monkeypatch.setattr(main, "_render_storage", lambda: SimpleNamespace(
+        presign_get=lambda *args, **kwargs: "https://fixture.invalid/private-source",
+        presign_put=lambda *args, **kwargs: "https://fixture.invalid/private-output",
+    ))
+    with db.connect() as conn:
+        conn.execute("UPDATE users SET render_enabled = TRUE WHERE user_id = %s", (user_id,))
+        conn.execute(
+            """
+            UPDATE provider_nodes
+            SET render_eligible = TRUE, accepts_work = TRUE, blender_version = '4.3.2',
+                last_heartbeat_at = now()
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO render_jobs (
+                job_id, user_id, status, blender_version, engine, frame_start, frame_end,
+                output_format, source_object_key
+            ) VALUES ('render-job-fixture', %s, 'queued', '4.3', 'cycles', 1, 2, 'png', 'private-source-key')
+            """,
+            (user_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO render_frames (frame_id, job_id, frame_number, node_id, status, claimed_at)
+            VALUES ('frame-1', 'render-job-fixture', 1, NULL, 'queued', NULL),
+                   ('legacy-frame', 'render-job-fixture', 2, %s, 'completed', now())
+            """,
+            (NODE["node_id"],),
+        )
+    assert client.get(JOBS, headers=owner).json() == []
+
+    claim = client.post(
+        "/providers/render/claim", params={"node_id": NODE["node_id"]},
+        headers=bearer(first.json()["node_token"]),
+    )
+    assert claim.status_code == 200
+    assert claim.json()["frame"]["frame_id"] == "frame-1"
+    history = client.get(JOBS, headers=owner)
+    assert [row["workload"] for row in history.json()] == ["render_frame"]
+    assert "private-source" not in history.text and "private-output" not in history.text
+    assert "renderer@example.test" not in history.text
+    assert client.get(JOBS, headers=other).json() == []
+
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE render_frames SET lease_expires_at = now() - interval '1 second' WHERE frame_id = 'frame-1'"
+        )
+    assert client.get(JOBS, headers=owner).json()[0]["status"] == "lease_expired"
+
+    reclaimed = client.post(
+        "/providers/render/claim", params={"node_id": OTHER_NODE["node_id"]},
+        headers=bearer(second.json()["node_token"]),
+    )
+    assert reclaimed.status_code == 200
+    assert reclaimed.json()["frame"]["frame_id"] == "frame-1"
+    assert client.get(JOBS, headers=owner).json() == []
+    assert client.get(JOBS, headers=other).json()[0]["status"] == "claimed"
+    with db.connect() as conn:
+        conn.execute("UPDATE render_jobs SET status = 'cancelled' WHERE job_id = 'render-job-fixture'")
+    assert client.get(JOBS, headers=other).json()[0]["status"] == "cancelled"
+
+
+def test_operator_approval_is_bound_to_the_current_owner_and_credential(client, monkeypatch):
+    provider = provider_headers(client)
+    account_id = client.get(f"{PROVIDER_AUTH}/me", headers=provider).json()["provider_account_id"]
+    first = enrol(client, mint_key(client, provider))
+    assert first.status_code == 201
+    credential = bearer(first.json()["node_token"])
+
+    operator_signup = client.post("/v1/auth/signup", json={**ACCOUNT, "email": "operator@example.test"})
+    assert operator_signup.status_code == 201
+    operator = bearer(operator_signup.json()["token"])
+    actor_id = operator_signup.json()["user"]["user_id"]
+    approved = {"provider_account_id": account_id, "approved": True}
+    assert client.post(APPROVAL, json=approved, headers=provider).status_code == 401
+    assert client.post(APPROVAL, json=approved, headers=operator).status_code == 403
+    with db.connect() as conn:
+        conn.execute("UPDATE users SET is_operator = TRUE WHERE user_id = %s", (actor_id,))
+    assert client.post(
+        APPROVAL, json={**approved, "provider_account_id": "prv_" + "0" * 32}, headers=operator,
+    ).status_code == 404
+    assert client.post(APPROVAL, json=approved, headers=operator).status_code == 409
+    assert client.post("/providers/heartbeat", json=HEARTBEAT, headers=credential).status_code == 200
+
+    def fail_audit(*args, **kwargs):
+        raise psycopg.OperationalError("synthetic audit insert failure")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(main, "_record_provider_node_event", fail_audit)
+        assert client.post(APPROVAL, json=approved, headers=operator).status_code == 503
+    assert client.get(NODES, headers=provider).json()[0]["inference_eligible"] is False
+    first_approval = client.post(APPROVAL, json=approved, headers=operator)
+    assert first_approval.status_code == 200
+    assert first_approval.json()["changed"] is True
+    assert client.post(APPROVAL, json=approved, headers=operator).json()["changed"] is False
+    machine = client.get(NODES, headers=provider).json()[0]
+    assert machine["inference_eligible"] is True and machine["render_eligible"] is False
+
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE provider_nodes SET last_heartbeat_at = now() - interval '1 hour' WHERE node_id = %s",
+            (NODE["node_id"],),
+        )
+    pause = {**approved, "approved": False}
+    assert client.post(APPROVAL, json=pause, headers=operator).json()["changed"] is True
+    assert client.post(APPROVAL, json=approved, headers=operator).status_code == 409
+
+    assert client.post("/providers/heartbeat", json=HEARTBEAT, headers=credential).status_code == 200
+    assert enrol(client, mint_key(client, provider)).status_code == 201
+    # A fresh timestamp from the earlier credential is insufficient.
+    assert client.post(APPROVAL, json=approved, headers=operator).status_code == 409
+
+    revoke_url = f"{NODES}/{NODE['node_id']}"
+    with monkeypatch.context() as failure:
+        failure.setattr(main, "_record_provider_node_event", fail_audit)
+        assert client.delete(revoke_url, headers=provider).status_code == 503
+    assert client.get(NODES, headers=provider).json()[0]["revoked_at"] is None
+    assert client.delete(revoke_url, headers=provider).status_code == 204
+    assert client.delete(revoke_url, headers=provider).status_code == 204
+    assert client.post(APPROVAL, json=approved, headers=operator).status_code == 409
+    with db.connect() as conn:
+        events = conn.execute(
+            """
+            SELECT event_type, actor_id, provider_account_id
+            FROM provider_node_events WHERE node_id = %s ORDER BY event_id
+            """,
+            (NODE["node_id"],),
+        ).fetchall()
+    assert [(event["event_type"], event["actor_id"]) for event in events] == [
+        ("inference_approved", actor_id), ("inference_paused", actor_id),
+        ("node_credential_revoked", account_id),
+    ]
+    assert {event["provider_account_id"] for event in events} == {account_id}

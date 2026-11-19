@@ -82,7 +82,7 @@ def test_run_sends_the_job_to_the_local_runtime():
         return _ollama_response(request)
 
     w = worker.Worker(
-        ProviderState(), _FakeSupervisor(), base_url="http://orch.invalid"
+        ProviderState(), _FakeSupervisor(), base_url="https://orch.invalid"
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as runtime:
         result = w.run(_job(), runtime=runtime)
@@ -133,7 +133,7 @@ def test_claim_without_a_credential_asks_for_nothing(monkeypatch):
     # A node that has not registered yet, or whose token write failed, must not
     # send an unauthenticated claim -- it would be rejected, logged as an error,
     # and retried forever. Returning None keeps it quietly idle instead.
-    monkeypatch.setattr("agent.identity.node_token", lambda: None)
+    monkeypatch.setattr("agent.core.creds.load", lambda: None)
 
     called = False
 
@@ -148,10 +148,10 @@ def test_claim_without_a_credential_asks_for_nothing(monkeypatch):
     assert not called
 
 
-def test_rejected_credential_is_discarded_so_registration_can_heal_it(monkeypatch):
+def test_rejected_credential_is_discarded_and_enrolment_is_required(monkeypatch):
     cleared = []
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_stale")
-    monkeypatch.setattr("agent.identity.clear_node_token", lambda: cleared.append(True))
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_stale")
+    monkeypatch.setattr("agent.core.creds.clear", lambda: cleared.append(True))
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"detail": "invalid node credential"})
@@ -160,16 +160,14 @@ def test_rejected_credential_is_discarded_so_registration_can_heal_it(monkeypatc
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert w.claim(client) is None
 
-    # Dropping the file is what makes the next registration mint a fresh token.
-    # Without this the agent would 401 on every claim until someone restarted
-    # it, with a perfectly valid-looking token sitting on disk.
     assert cleared == [True]
+    assert w.state.link.value == "unenrolled"
 
 
 def test_a_reassigned_job_is_not_retried(monkeypatch):
     # 409 means the lease lapsed and somebody else owns the work now. Raising
     # here would make the worker retry a result that can never be accepted.
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(409, json={"detail": "job is not claimed by this node"})
@@ -182,7 +180,7 @@ def test_a_reassigned_job_is_not_retried(monkeypatch):
 def test_a_reassigned_frame_result_is_dropped_not_retried(monkeypatch):
     # A conflict is an ownership answer, not a transient transport failure.
     # Retrying cannot make the lease belong to this node again.
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -232,7 +230,7 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
     metered hosting, a bill. Nothing raises, which is exactly why this needs a
     test rather than a comment.
     """
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
     # This regression is specifically about the inference-only empty cycle.
     # Pinning discovery keeps it independent of whether a CI host happens to
     # have Blender installed.
@@ -269,7 +267,7 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
         _FakeSupervisor(),
         accepting,
         RecordingStop(),
-        base_url="http://orch.invalid",
+        base_url="https://orch.invalid",
     )
 
     assert calls["claims"] == 1, "claimed more than once without waiting"
@@ -279,7 +277,7 @@ def test_the_loop_waits_between_empty_claims(monkeypatch):
 
 
 def test_machine_without_blender_never_calls_the_render_claim_endpoint(monkeypatch):
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
     monkeypatch.setattr(worker.blender, "find_binary", lambda: None)
     calls = []
 
@@ -294,7 +292,7 @@ def test_machine_without_blender_never_calls_the_render_claim_endpoint(monkeypat
 
 
 def test_no_output_render_is_reported_as_failed(monkeypatch):
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
     monkeypatch.setattr(worker.blender, "find_binary", lambda: Path("blender.exe"))
     monkeypatch.setattr(worker.blender, "detect_version", lambda binary: "4.3.2")
 
@@ -345,7 +343,7 @@ def test_no_output_render_is_reported_as_failed(monkeypatch):
         _FakeSupervisor(),
         accepting,
         stop,
-        base_url="http://orch.invalid",
+        base_url="https://orch.invalid",
     )
 
     assert len(reports) == 1
@@ -356,7 +354,7 @@ def test_no_output_render_is_reported_as_failed(monkeypatch):
 
 def test_inference_claim_prevents_a_second_render_claim(monkeypatch):
     """A server offering both kinds of work must still transfer one lease."""
-    monkeypatch.setattr("agent.identity.node_token", lambda: "nf_node_ok")
+    monkeypatch.setattr("agent.core.creds.load", lambda: "nf_node_ok")
     monkeypatch.setattr(worker.blender, "find_binary", lambda: Path("blender.exe"))
     monkeypatch.setattr(worker.blender, "detect_version", lambda binary: "4.3.2")
 
@@ -399,7 +397,7 @@ def test_inference_claim_prevents_a_second_render_claim(monkeypatch):
         _FakeSupervisor(),
         accepting,
         stop,
-        base_url="http://orch.invalid",
+        base_url="https://orch.invalid",
     )
 
     assert calls == {

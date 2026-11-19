@@ -43,6 +43,8 @@ from orchestrator.models import (
     EnrolmentKeyView,
     HeartbeatRequest,
     HeartbeatResponse,
+    InferenceApprovalRequest,
+    InferenceApprovalView,
     JobClaimResponse,
     JobOffer,
     JobPayload,
@@ -56,6 +58,7 @@ from orchestrator.models import (
     OwnedNodeView,
     ProviderAccountView,
     ProviderSessionCreated,
+    ProviderWorkView,
     RegisterRequest,
     RegisterResponse,
     RenderArtifact,
@@ -253,14 +256,19 @@ def ping():
     return {"service": "orchestrator"}
 
 
+def _database_probe_ok() -> bool:
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+    except (db.NotConfigured, psycopg.Error, OSError):
+        return False
+    return True
+
+
 @app.get("/health")
 def health():
-    try:
-        with db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-    except (db.NotConfigured, psycopg.Error, OSError):
+    if not _database_probe_ok():
         return JSONResponse(
             status_code=503,
             content={"status": "degraded", "db": "down", "version": VERSION},
@@ -283,6 +291,29 @@ def health():
             },
         )
     return {"status": "ok", "db": "ok", "schema": "ok", "version": VERSION}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(authorization: Annotated[str | None, Header()] = None) -> Response:
+    token = os.getenv("METRICS_BEARER_TOKEN")
+    if not token:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not secrets.compare_digest(_bearer_digest(authorization), auth.hash_token(token)):
+        raise _unauthorized("Invalid metrics bearer token")
+
+    database_ok = _database_probe_ok()
+    ready = database_ok and _schema_error is None
+    return Response(
+        content=(
+            "# HELP marketplace_dependency_up Whether the dependency probe succeeded.\n"
+            "# TYPE marketplace_dependency_up gauge\n"
+            f'marketplace_dependency_up{{dependency="postgres"}} {int(database_ok)}\n'
+            "# HELP marketplace_orchestrator_ready Whether the health check passes.\n"
+            "# TYPE marketplace_orchestrator_ready gauge\n"
+            f"marketplace_orchestrator_ready {int(ready)}\n"
+        ),
+        media_type="text/plain; version=0.0.4",
+    )
 
 
 def _upsert_node(cur: psycopg.Cursor, req: RegisterRequest, *, fresh_credential: bool) -> dict:
@@ -1561,6 +1592,8 @@ def list_owned_nodes(authorization: str | None = Header(default=None)):
             cur.execute(
                 """
                 SELECT c.node_id, c.revoked_at, n.hostname, n.last_heartbeat_at,
+                       n.gpu_name, n.vram_total_mb, n.gpu_utilisation_pct, n.temperature_c,
+                       COALESCE(n.ollama_reachable, FALSE) AS ollama_reachable,
                        COALESCE(n.accepts_work, FALSE) AS accepts_work,
                        COALESCE(n.inference_eligible, FALSE) AS inference_eligible,
                        COALESCE(n.render_eligible, FALSE) AS render_eligible
@@ -1571,9 +1604,11 @@ def list_owned_nodes(authorization: str | None = Header(default=None)):
                 """,
                 (account["provider_account_id"],),
             )
-            return cur.fetchall()
+            rows = cur.fetchall()
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
         raise _unavailable(exc) from exc
+    now, window = _now(), ttl()
+    return [{**row, "liveness": liveness(row["last_heartbeat_at"], now, window)} for row in rows]
 
 
 @app.delete("/v1/provider/nodes/{node_id}", status_code=204, response_class=Response)
@@ -1582,22 +1617,133 @@ def revoke_owned_node(
     authorization: str | None = Header(default=None),
 ):
     account = _authenticate_provider_session(authorization)
+    account_id = account["provider_account_id"]
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            credential = _node_credential(cur, node_id)
+            if not credential or credential["provider_account_id"] != account_id:
+                raise HTTPException(status_code=404, detail="node not found")
+            if credential["revoked_at"] is not None:
+                return Response(status_code=204)
+            cur.execute(
+                """
+                UPDATE provider_node_credentials SET revoked_at = clock_timestamp()
+                WHERE node_id = %s
+                """,
+                (node_id,),
+            )
+            _disable_node_work(cur, node_id)
+            _record_provider_node_event(cur, node_id, account_id, account_id, "node_credential_revoked")
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return Response(status_code=204)
+
+
+def _record_provider_node_event(
+    cur: psycopg.Cursor, node_id: str, provider_account_id: str, actor_id: str, event_type: str,
+) -> None:
+    cur.execute(
+        """
+        INSERT INTO provider_node_events (node_id, provider_account_id, actor_id, event_type)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (node_id, provider_account_id, actor_id, event_type),
+    )
+
+
+@app.post("/v1/operator/providers/nodes/{node_id}/inference-approval", response_model=InferenceApprovalView)
+def set_provider_inference_approval(
+    node_id: Annotated[str, Path(min_length=8, max_length=64)],
+    request: InferenceApprovalRequest,
+    authorization: str | None = Header(default=None),
+):
+    operator = _authenticate_session(authorization)
+    if not operator["is_operator"]:
+        raise HTTPException(status_code=403, detail="operator access required")
+    account_id = request.provider_account_id
+    try:
+        with db.connect() as conn, conn.cursor() as cur:
+            # Claims, re-enrolment and revocation all acquire this same lock.
+            credential = _node_credential(cur, node_id)
+            if not credential or credential["provider_account_id"] != account_id:
+                raise HTTPException(status_code=404, detail="enrolled node for this provider not found")
+            if request.approved and credential["revoked_at"] is not None:
+                raise HTTPException(status_code=409, detail="the node credential has been revoked")
+            cur.execute(
+                """
+                SELECT inference_eligible, last_heartbeat_at
+                FROM provider_nodes WHERE node_id = %s FOR UPDATE
+                """,
+                (node_id,),
+            )
+            node = cur.fetchone()
+            if not node:
+                raise HTTPException(status_code=409, detail="node must register before its approval can change")
+            if request.approved:
+                heartbeat = node["last_heartbeat_at"]
+                if (
+                    liveness(heartbeat, _now(), ttl()) != "online"
+                    or heartbeat < credential["issued_at"]
+                ):
+                    raise HTTPException(
+                        status_code=409, detail="a fresh heartbeat with the current credential is required",
+                    )
+            changed = node["inference_eligible"] != request.approved
+            if changed:
+                cur.execute(
+                    "UPDATE provider_nodes SET inference_eligible = %s WHERE node_id = %s",
+                    (request.approved, node_id),
+                )
+                event = "inference_approved" if request.approved else "inference_paused"
+                _record_provider_node_event(cur, node_id, account_id, operator["user_id"], event)
+    except (db.NotConfigured, psycopg.Error, OSError) as exc:
+        raise _unavailable(exc) from exc
+    return InferenceApprovalView(
+        node_id=node_id, provider_account_id=account_id,
+        inference_eligible=request.approved, changed=changed,
+    )
+
+
+@app.get("/v1/provider/jobs", response_model=list[ProviderWorkView])
+def list_provider_jobs(authorization: str | None = Header(default=None)):
+    """Read recent work attributed to the signed-in provider at claim time."""
+    account = _authenticate_provider_session(authorization)
     try:
         with db.connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE provider_node_credentials SET revoked_at = COALESCE(revoked_at, now())
-                WHERE node_id = %s AND provider_account_id = %s
-                RETURNING node_id
+                WITH recent_work AS (
+                    (SELECT job_id AS work_id, 'inference' AS workload, node_id, status,
+                            claimed_at, completed_at, lease_expires_at, FALSE AS cancelled
+                     FROM inference_jobs
+                     WHERE provider_account_id = %(account)s AND claimed_at IS NOT NULL
+                     ORDER BY claimed_at DESC, job_id
+                     LIMIT 50)
+                    UNION ALL
+                    (SELECT f.frame_id, 'render_frame', f.node_id, f.status,
+                            f.claimed_at, f.completed_at, f.lease_expires_at, r.status = 'cancelled'
+                     FROM render_frames f
+                     JOIN render_jobs r ON r.job_id = f.job_id
+                     WHERE f.provider_account_id = %(account)s AND f.claimed_at IS NOT NULL
+                     ORDER BY f.claimed_at DESC, f.frame_id
+                     LIMIT 50)
+                )
+                SELECT work_id, workload, node_id, claimed_at, completed_at,
+                       CASE
+                           WHEN status <> 'claimed' THEN status
+                           WHEN cancelled THEN 'cancelled'
+                           WHEN lease_expires_at < %(now)s THEN 'lease_expired'
+                           ELSE status
+                       END AS status
+                FROM recent_work
+                ORDER BY claimed_at DESC, workload, work_id
+                LIMIT 50
                 """,
-                (node_id, account["provider_account_id"]),
+                {"account": account["provider_account_id"], "now": _now()},
             )
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="node not found")
-            _disable_node_work(cur, node_id)
+            return cur.fetchall()
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
         raise _unavailable(exc) from exc
-    return Response(status_code=204)
 
 
 # ===========================================================================
@@ -1657,7 +1803,7 @@ def _node_credential(cur: psycopg.Cursor, node_id: str) -> dict | None:
     # credential change or revocation therefore has a defined order vs claims.
     cur.execute(
         """
-        SELECT token_hash, issued_at, revoked_at
+        SELECT provider_account_id, token_hash, issued_at, revoked_at
         FROM provider_node_credentials WHERE node_id = %s FOR UPDATE
         """,
         (node_id,),
@@ -1695,14 +1841,16 @@ def _authenticate_node(
     )
     row = cur.fetchone()
     if credential and row is None:
-        if telemetry_only:
-            raise HTTPException(status_code=404, detail="node telemetry missing; register again")
-        raise _unauthorized("node must register before claiming work")
+        raise HTTPException(status_code=404, detail="node telemetry missing; register again")
     if not credential:
         legacy_digest = row["node_token_hash"] if row else None
         if not legacy_digest or not secrets.compare_digest(legacy_digest, digest):
             raise _unauthorized("invalid node credential")
-    return {**row, "issued_at": credential["issued_at"] if credential else None}
+    return {
+        **row,
+        "issued_at": credential["issued_at"] if credential else None,
+        "provider_account_id": credential["provider_account_id"] if credential else None,
+    }
 
 
 @app.post("/providers/work/claim", response_model=JobClaimResponse)
@@ -1741,6 +1889,7 @@ def claim_work(
                     """
                     UPDATE inference_jobs SET
                         status = 'claimed',
+                        provider_account_id = %s,
                         claimed_at = %s,
                         lease_expires_at = %s
                     WHERE job_id IN (
@@ -1756,7 +1905,7 @@ def claim_work(
                     )
                     RETURNING job_id, model, payload, lease_expires_at
                     """,
-                    (now, lease_until, node_id, node["issued_at"], now),
+                    (node["provider_account_id"], now, lease_until, node_id, node["issued_at"], now),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -2805,6 +2954,7 @@ def claim_render_frame(
                     UPDATE render_frames SET
                         status = 'claimed',
                         node_id = %(node_id)s,
+                        provider_account_id = %(account)s,
                         claimed_at = %(now)s,
                         lease_expires_at = %(lease_until)s,
                         attempts = attempts + 1
@@ -2831,6 +2981,7 @@ def claim_render_frame(
                     """,
                     {
                         "node_id": node_id,
+                        "account": node["provider_account_id"],
                         "now": now,
                         "lease_until": lease_until,
                         "blender_series": _version_series(node_blender),

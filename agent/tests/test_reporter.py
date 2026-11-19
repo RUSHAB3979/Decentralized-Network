@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from agent import identity, reporter, worker
+from agent.core import creds
 from agent.state import ProviderState
 from agent.telemetry import Gpu, Host, Model, Node, Ollama, Orchestrator, Telemetry
 
@@ -153,7 +154,7 @@ def test_a_node_that_cannot_serve_never_claims_to_accept_work():
             },
         )
 
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
     rep.registered = True
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         rep.heartbeat(client, telemetry(rentable=False, accepts=True))
@@ -165,7 +166,7 @@ def test_unknown_node_triggers_re_registration():
     # The recovery path for a restored or wiped database. Without it, agents
     # heartbeat successfully into a registry that has no row for them and the
     # marketplace silently shows nothing.
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
     rep.registered = True
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -177,7 +178,7 @@ def test_unknown_node_triggers_re_registration():
 
 
 def test_server_dictates_the_heartbeat_interval():
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -222,7 +223,7 @@ def test_loop_survives_an_unreachable_orchestrator(monkeypatch):
 
     thread = threading.Thread(
         target=reporter.run,
-        args=(ProviderState(), stop, "http://orchestrator.invalid"),
+        args=(ProviderState(), stop, "https://orchestrator.invalid"),
         daemon=True,
     )
     thread.start()
@@ -300,7 +301,7 @@ def test_heartbeat_carries_the_node_credential():
             },
         )
 
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
     rep.registered = True
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert rep.heartbeat(client, telemetry()) is True
@@ -308,50 +309,124 @@ def test_heartbeat_carries_the_node_credential():
     assert seen["authorization"] == "Bearer test-node-token"
 
 
-def test_a_rejected_credential_is_discarded_and_the_node_re_registers(monkeypatch):
-    """A 401 must not be a permanent state.
-
-    The token on disk and the digest in the database can disagree after a
-    restore or a re-install. Keeping the local copy would fail every heartbeat
-    identically for as long as the app ran, and the repair -- registration,
-    which mints a new token -- would never be reached.
-    """
+def test_rejected_credential_requires_a_new_enrolment_key(monkeypatch):
     cleared = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"detail": "bad credential"})
 
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
     rep.registered = True
     monkeypatch.setattr(
-        reporter.identity, "clear_node_token", lambda: cleared.append(True)
+        creds, "clear", lambda: cleared.append(True)
     )
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert rep.heartbeat(client, telemetry()) is False
 
     assert cleared, "the rejected token was kept"
     assert rep.registered is False
+    assert rep.state.link.value == "unenrolled"
 
 
-def test_a_node_with_no_credential_registers_instead_of_heartbeating(monkeypatch):
-    """No token means no request at all, not an unauthenticated one.
-
-    Sending the heartbeat anyway would spend a round trip to be refused, and
-    the node cannot be given work without a credential regardless -- so the
-    only useful thing to do is go back through registration, which is what
-    produces one.
-    """
-    monkeypatch.setattr(reporter.identity, "node_token", lambda: None)
+def test_a_node_with_no_credential_waits_for_enrolment(monkeypatch):
+    monkeypatch.setattr(creds, "load", lambda: None)
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url)
         return httpx.Response(200, json={})
 
-    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
     rep.registered = True
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         assert rep.heartbeat(client, telemetry()) is False
 
     assert calls == [], "heartbeated without a credential"
+    assert rep.state.link.value == "unenrolled"
     assert rep.registered is False
+
+
+def test_enrolment_persists_only_the_node_credential_and_restart_registers(monkeypatch, capsys):
+    key = "nf_enrol_" + "A" * 43
+    node_token = "nf_node_" + "B" * 43
+    stored = []
+    calls = []
+    state = ProviderState()
+    rep = reporter.Reporter(state, "https://orchestrator.invalid")
+    monkeypatch.setattr(reporter, "snapshot", lambda _state: telemetry())
+    monkeypatch.setattr(creds, "load", lambda: stored[-1] if stored else None)
+    monkeypatch.setattr(creds, "store", stored.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        expected = key if request.url.path == "/providers/enrol" else node_token
+        assert request.headers["Authorization"] == f"Bearer {expected}"
+        assert json.loads(request.content)["node_id"] == rep.node_id
+        assert expected.encode() not in request.content
+        if request.url.path == "/providers/enrol":
+            return httpx.Response(201, json={"node_id": rep.node_id, "node_token": node_token})
+        return httpx.Response(200, json={"heartbeat_interval_s": 15})
+
+    real_client = httpx.Client
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(reporter.httpx, "Client", lambda: real_client(transport=transport))
+    assert rep.enrol(key) is None
+    assert stored == [node_token]
+    restarted = reporter.Reporter(ProviderState(), rep.base_url)
+    with httpx.Client() as client:
+        assert restarted.register(client, telemetry())
+        assert restarted.heartbeat(client, telemetry())
+    assert calls == ["/providers/enrol", "/providers/register", "/providers/heartbeat"]
+    output = capsys.readouterr().out + state.link_detail
+    assert key not in output and node_token not in output
+
+
+def test_enrolment_does_not_spend_a_key_when_the_vault_is_unavailable(monkeypatch):
+    def unavailable():
+        raise NotImplementedError
+
+    monkeypatch.setattr(creds, "load", unavailable)
+
+    def unexpectedly_called():
+        pytest.fail("A key was spent without a credential store")
+
+    monkeypatch.setattr(reporter.httpx, "Client", unexpectedly_called)
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
+    assert "credential store is unavailable" in rep.enrol("nf_enrol_" + "A" * 43)
+    assert rep.enrolment.token() is None
+    assert rep.state.link.value == "credential_error"
+
+
+def test_store_failure_blocks_work_even_if_the_vault_returns_partial_data(monkeypatch):
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
+    stored = []
+    token = "nf_node_" + "B" * 43
+    monkeypatch.setattr(creds, "load", lambda: stored[-1] if stored else None)
+
+    def fail_after_write(credential):
+        stored.append(credential)
+        raise OSError("synthetic vault write failure")
+
+    monkeypatch.setattr(creds, "store", fail_after_write)
+    error = rep.enrolment.submit("nf_enrol_" + "A" * 43, lambda _key: token)
+    assert "Windows could not save" in error
+    assert rep.enrolment.token() is None
+    assert rep.state.link.value == "credential_error"
+
+
+def test_rejection_of_an_earlier_credential_preserves_the_current_one(monkeypatch):
+    rep = reporter.Reporter(ProviderState(), "https://orchestrator.invalid")
+    monkeypatch.setattr(creds, "load", lambda: "current-token")
+
+    def unexpectedly_cleared():
+        pytest.fail("An earlier response cleared a newer credential")
+
+    monkeypatch.setattr(creds, "clear", unexpectedly_cleared)
+    rep.enrolment.reject("earlier-token")
+    assert rep.enrolment.token() == "current-token"
+
+
+def test_enrolment_refuses_to_send_credentials_over_remote_plain_http():
+    rep = reporter.Reporter(ProviderState(), "http://orchestrator.invalid")
+    assert "HTTPS" in rep.enrol("nf_enrol_" + "A" * 43)
+    assert rep.enrolment.token() is None
