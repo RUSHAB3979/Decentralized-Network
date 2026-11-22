@@ -262,16 +262,16 @@ invented hardware.
 
 ### 7. Run rented inference
 
-Inference runs **on the provider's machine**, not on the orchestrator. The
-orchestrator queues a job for a chosen node; that node's agent claims it over a
-connection it opened itself, runs it against its own Ollama, and posts the
-result back. That direction matters: a provider's PC sits behind a home router
-with no address the server could dial.
+Inference runs **on the provider's machine**. The orchestrator checks that a
+compatible provider is online and queues the job. An eligible agent with the
+requested model can claim it over a connection it opened itself, run it against
+its own Ollama, and post the result back. This works when the provider's PC sits
+behind a home router.
 
 There is no longer a `LOCAL_DEMO_MODE`, a `DEMO_PROVIDER_NODE_ID`, or a
-`LOCAL_OLLAMA_URL` on the orchestrator. Any online provider that advertises the
-model is eligible, and API keys belong to a real account instead of to whoever
-reached the box from localhost.
+`LOCAL_OLLAMA_URL` on the orchestrator. A provider must be approved for
+inference, online, accepting work, and reporting both a reachable Ollama and
+the requested model. Customer API keys belong to an account.
 
 **Create an account and a key.**
 
@@ -311,14 +311,16 @@ customer's key terminates at the orchestrator and is never forwarded.
 - Toggle the tray to draining, then send a request → `503`, no provider
   accepting.
 - Ask for a model no provider has → `404`.
-- Stop the agent mid-request → `504` after `DISPATCH_WAIT_SEC`, and the job
-  stays queued rather than being lost. Restart the agent and it is picked up.
+- Stop the initially matched agent before it claims the job. A second eligible
+  agent with the same model can pick up the waiting job and return the result.
+- If no provider returns a result by `DISPATCH_WAIT_SEC`, the customer gets
+  `504`. The job can still complete later. A job already claimed stays tied to
+  the node that claimed it.
 - Restart the agent → its credential rotates, and the previous one stops
   working.
 
-The demo intentionally lacks provider authentication, TLS, sandboxing,
-payments, rate limits, multi-provider scheduling, and failover. Do not expose
-it to the public internet.
+The demo lacks sandboxing, payments, capacity-aware scheduling, and failover
+to another provider after a claim. Do not expose it to the public internet.
 
 ### 8. Run the tests
 
