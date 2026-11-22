@@ -959,17 +959,15 @@ def _dispatch_chat_completion(
 ) -> ChatCompletionResponse:
     """Run a chat completion on a provider's machine and return the result.
 
-    The shape of this changed. It used to authenticate the key, validate that a
-    configured node was online, and then call Ollama on the orchestrator's own
-    host -- the provider was checked and then ignored. Now the work is enqueued
-    for a specific node, that node's agent claims it over a connection it opened
-    itself, and this handler waits for the answer to come back.
+    Check that a compatible provider is online before enqueueing. The initial
+    match is recorded at enqueue time. When an eligible node with the model
+    claims the job, both rows record the actual node.
 
     The three failures below are deliberately distinct, because they send
     whoever is debugging to three different places:
       503  no node is online and accepting -- a marketplace supply problem
       404  the model is not installed anywhere -- a catalogue problem
-      504  a node took the job and did not answer -- a provider problem
+      504  no provider returned a result before the deadline
 
     Callers reach this through chat_completions(), which has already refused
     streaming, authenticated the key, and taken a concurrency slot.
@@ -1834,7 +1832,7 @@ def _authenticate_node(
     cur.execute(
         """
         SELECT node_token_hash, accepts_work, inference_eligible,
-               render_eligible, blender_version, ollama_reachable, last_heartbeat_at
+               render_eligible, blender_version, ollama_reachable, last_heartbeat_at, local_models
         FROM provider_nodes WHERE node_id = %s FOR UPDATE
         """,
         (node_id,),
@@ -1866,11 +1864,9 @@ def claim_work(
     claiming rather than blocking on them, so neither request waits and neither
     job goes out twice.
 
-    A job is claimable when it is queued, OR when it was claimed and its lease
-    has since passed. That second clause is the reclaim path, and it is derived
-    at read time rather than performed by a sweeper -- a sweeper that died would
-    strand every in-flight job in `claimed` forever with nothing raising, which
-    is the failure mode this repository keeps designing away from.
+    Any eligible node that reports the requested model can claim a queued job
+    created during its enrolment. An expired claim remains reclaimable only
+    by the node that took it.
     """
     digest = _bearer_digest(authorization)
     interval = claim_poll_interval_s()
@@ -1889,25 +1885,39 @@ def claim_work(
                     """
                     UPDATE inference_jobs SET
                         status = 'claimed',
-                        provider_account_id = %s,
-                        claimed_at = %s,
-                        lease_expires_at = %s
+                        node_id = %(node_id)s,
+                        provider_account_id = %(account_id)s,
+                        claimed_at = %(now)s,
+                        lease_expires_at = %(lease_until)s
                     WHERE job_id IN (
                         SELECT job_id FROM inference_jobs
-                        WHERE node_id = %s AND created_at >= %s
+                        WHERE created_at >= %(issued_at)s
                           AND (
-                                status = 'queued'
-                             OR (status = 'claimed' AND lease_expires_at < %s)
+                              (status = 'queued' AND model = ANY(%(models)s::text[]))
+                              OR (status = 'claimed' AND node_id = %(node_id)s
+                                  AND lease_expires_at < %(now)s)
                           )
                         ORDER BY created_at
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
-                    RETURNING job_id, model, payload, lease_expires_at
+                    RETURNING job_id, request_id, model, payload, lease_expires_at
                     """,
-                    (node["provider_account_id"], now, lease_until, node_id, node["issued_at"], now),
+                    {
+                        "node_id": node_id,
+                        "account_id": node["provider_account_id"],
+                        "now": now,
+                        "lease_until": lease_until,
+                        "issued_at": node["issued_at"],
+                        "models": node["local_models"] or [],
+                    },
                 )
                 row = cur.fetchone()
+                if row:
+                    cur.execute(
+                        "UPDATE inference_requests SET node_id = %s WHERE request_id = %s",
+                        (node_id, row["request_id"]),
+                    )
             conn.commit()
     except (db.NotConfigured, psycopg.Error, OSError) as exc:
         raise _unavailable(exc) from exc

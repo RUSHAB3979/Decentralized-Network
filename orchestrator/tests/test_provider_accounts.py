@@ -237,6 +237,80 @@ def test_legacy_node_can_report_but_cannot_claim_work(client):
         ).status_code == 401
 
 
+def test_waiting_inference_can_be_claimed_by_another_compatible_node(client, monkeypatch):
+    monkeypatch.setenv("DISPATCH_WAIT_SEC", "10")
+    owner = provider_headers(client)
+    workers = {}
+    for registration in (NODE, OTHER_NODE, {**NODE, "node_id": "pilot-node-003"}):
+        node_id = registration["node_id"]
+        enrolled = enrol(client, mint_key(client, owner), registration)
+        assert enrolled.status_code == 201
+        workers[node_id] = bearer(enrolled.json()["node_token"])
+        metrics = HEARTBEAT["metrics"]
+        if node_id == "pilot-node-003":
+            metrics = {**metrics, "local_models": ["other:model"]}
+        assert client.post(
+            "/providers/heartbeat",
+            json={**HEARTBEAT, "node_id": node_id, "metrics": metrics},
+            headers=workers[node_id],
+        ).status_code == 200
+
+    first, alternate, wrong_model = workers
+    with db.connect() as conn:
+        conn.execute("UPDATE provider_nodes SET inference_eligible = TRUE")
+        conn.execute(
+            "UPDATE provider_nodes SET last_heartbeat_at = now() - interval '1 second'"
+        )
+        conn.execute(
+            "UPDATE provider_nodes SET last_heartbeat_at = now() WHERE node_id = %s", (first,)
+        )
+    customer = client.post("/v1/auth/signup", json={**ACCOUNT, "email": "customer@example.test"})
+    assert customer.status_code == 201
+    key = client.post("/v1/api-keys", json={}, headers=bearer(customer.json()["token"]))
+    assert key.status_code == 201
+    payload = {"model": "fixture:model", "messages": [{"role": "user", "content": "fixture"}]}
+
+    def claim(node_id):
+        response = client.post(
+            "/providers/work/claim", params={"node_id": node_id}, headers=workers[node_id],
+        )
+        assert response.status_code == 200
+        return response.json()["job"]
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(
+            client.post, "/v1/chat/completions", headers=bearer(key.json()["key"]), json=payload,
+        )
+        queued = None
+        deadline = monotonic() + 4
+        while queued is None and monotonic() < deadline and not pending.done():
+            with db.connect() as conn:
+                queued = conn.execute("SELECT job_id, node_id FROM inference_jobs").fetchone()
+            if queued is None:
+                sleep(0.03)
+        assert queued is not None and queued["node_id"] == first
+
+        assert claim(wrong_model) is None
+        job = claim(alternate)
+        assert job is not None and job["job_id"] == queued["job_id"]
+        assert claim(first) is None
+
+        result_url = f"/providers/work/{job['job_id']}/result"
+        result = {"status": "completed", "content": "answer from the alternate"}
+        assert client.post(
+            result_url, params={"node_id": first}, headers=workers[first], json=result,
+        ).status_code == 409
+        assert client.post(
+            result_url, params={"node_id": alternate}, headers=workers[alternate], json=result,
+        ).status_code == 200
+        completion = pending.result(timeout=5)
+        assert completion.status_code == 200
+        assert completion.json()["choices"][0]["message"]["content"] == result["content"]
+
+    with db.connect() as conn:
+        assert conn.execute("SELECT node_id FROM inference_requests").fetchone()["node_id"] == alternate
+
+
 def test_approved_node_claims_and_returns_work_until_revoked(client, monkeypatch):
     monkeypatch.setenv("DISPATCH_WAIT_SEC", "5")
     owner = provider_headers(client)

@@ -340,9 +340,8 @@ CREATE TABLE IF NOT EXISTS inference_jobs (
     -- without losing the first one's evidence.
     request_id        TEXT        NOT NULL REFERENCES inference_requests(request_id),
 
-    -- Chosen at enqueue time. Not a foreign key to provider_nodes on purpose:
-    -- a node that deregisters mid-flight must not delete the record of work it
-    -- was given.
+    -- Initial match until claimed, then the node that took the job. Not a
+    -- foreign key: deleting a node must not delete the record of its work.
     node_id           TEXT        NOT NULL,
 
     model             TEXT        NOT NULL,
@@ -369,11 +368,13 @@ CREATE TABLE IF NOT EXISTS inference_jobs (
     completed_at      TIMESTAMPTZ
 );
 
--- The claim query filters on node and status and orders by age. This index
--- matches that access pattern; without it every claim scans the table, which
--- is fine at ten jobs and not at ten thousand.
+-- Expired claims are looked up by node. Queued jobs are looked up by model.
 CREATE INDEX IF NOT EXISTS inference_jobs_claimable_idx
     ON inference_jobs (node_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS inference_jobs_queued_model_idx
+    ON inference_jobs (model, created_at)
+    WHERE status = 'queued';
 
 -- The waiting request polls its own job by id; that is served by the primary
 -- key. This one serves "what happened to request X" during debugging.
