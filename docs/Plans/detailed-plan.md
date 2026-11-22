@@ -61,7 +61,7 @@
 
 1. **`docker-compose.yml` (Postgres Container)**
    - Confirm Postgres 16 container (`marketplace_db`) starts cleanly on `5432:5432`.
-   - Credentials: `user=marketplace`, `password=Rushab_God@123`, `db=marketplace`.
+   - Use the `marketplace` user and database. Set `POSTGRES_PASSWORD` in your local `.env` file.
 
 2. **`orchestrator/main.py` (FastAPI Server)**
    ```python
