@@ -84,7 +84,7 @@ function ProviderSignIn({ mode, authenticate }) {
         {signup ? 'Create a provider account' : 'Sign in to the provider console'}
       </h1>
       <p className="mt-2 text-sm leading-6 text-slate-400">
-        Use your provider account to enrol and manage your machines.
+        Use your provider account to enrol and manage your machines. A pilot operator must approve each machine before it receives work.
       </p>
       <form className="mt-6 grid gap-4" onSubmit={submit}>
         {signup && (
@@ -279,7 +279,8 @@ function EnrolmentPanel({ token, invalidate }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-xl">
           <h2 className="text-lg font-semibold">Enrolment keys</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-400">Generate a key, then paste it into the Windows provider app. Each key expires after 15 minutes and can be used once.</p>
+          <p className="mt-1 text-sm leading-6 text-slate-400">Get the matching Windows pilot build from your administrator. Generate a key when the app is ready, then paste it into <strong className="font-medium text-slate-200">Enrol this machine</strong>. Each key expires after 15 minutes and can be used once.</p>
+          <a className="mt-2 inline-block text-sm font-medium text-emerald-300 hover:underline" href="https://github.com/RUSHAB3979/Decentralized-Network/blob/main/docs/PROVIDER-APP.md#enrolment-on-the-development-branch">Windows setup guide</a>
         </div>
         <button className={PRIMARY} type="button" onClick={issue} disabled={busy || Boolean(issued)}>Generate key</button>
       </div>

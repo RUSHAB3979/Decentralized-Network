@@ -4,7 +4,6 @@ const COLS = [
     ['Product', ['Render jobs', 'Model APIs', 'Workstations', 'Cloud gaming']],
     ['Hosts', ['Start earning', 'Node guides', 'Payouts', 'Safety']],
     ['Company', ['About', 'Careers', 'Press', 'Contact']],
-    ['Legal', ['Terms', 'Privacy', 'Rights', 'DMCA']],
 ];
 const Footer = () => (<footer className="relative border-t border-white/[0.05] bg-[#03040c]">
     <div className="mx-auto max-w-7xl px-6 py-20 sm:px-10">
@@ -15,7 +14,7 @@ const Footer = () => (<footer className="relative border-t border-white/[0.05] b
         </p>
       </div>
 
-      <div className="mt-14 grid gap-12 md:grid-cols-[1.2fr_repeat(4,1fr)]">
+      <div className="mt-14 grid gap-12 md:grid-cols-[1.2fr_repeat(3,1fr)]">
         <div>
           <a href="#top" className="flex items-center gap-3">
             <Logo className="h-8 w-8"/>

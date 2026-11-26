@@ -17,7 +17,7 @@ const CTA = () => (<section id="cta" className="relative overflow-hidden">
         <em className="serif-italic text-iridescent">before the grid is live.</em>
       </h2>
       <p className="mx-auto mt-7 max-w-lg text-[16.5px] leading-[1.75] text-slate-300/85">
-        Explore the GPUOrbit frontend preview. Live GPU rentals, public provider onboarding, and payment collection are not enabled.
+        Customers join by invitation. Providers use the console to manage machines, and an operator approves each machine before it can accept pilot work.
       </p>
       <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
         <a href={import.meta.env.BASE_URL + '#/app'} className="btn-liquid group" data-mag>

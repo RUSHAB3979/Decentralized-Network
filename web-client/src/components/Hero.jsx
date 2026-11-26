@@ -50,7 +50,7 @@ const Hero = () => {
               Explore the MVP
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1"/>
             </a>
-            <a href="#marketplace" className="btn-quiet" data-mag>
+            <a href="#/provider" className="btn-quiet" data-mag>
               Provide a GPU
             </a>
           </div>

@@ -1,4 +1,4 @@
-// Accounts: signup, login, logout, and the session token that ties them
+// Accounts: login, logout, and the session token that ties them
 // together.
 //
 // Two things live here that could have been split, and are not on purpose.
@@ -127,20 +127,6 @@ function detailToMessage(payload, status) {
     return field ? `${field}: ${first.msg}` : first.msg;
   }
   return `Request failed (${status}).`;
-}
-
-export async function signup({ email, password, displayName }) {
-  const session = await authRequest('/signup', {
-    body: {
-      email,
-      password,
-      // The backend model forbids unknown fields and allows null here, so an
-      // empty input has to become null rather than an empty string.
-      display_name: displayName?.trim() || null,
-    },
-  });
-  storeToken(session.token);
-  return session;
 }
 
 export async function login({ email, password }) {

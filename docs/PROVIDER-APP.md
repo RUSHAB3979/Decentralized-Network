@@ -104,6 +104,47 @@ mark a provider's own GPU busy.
 
 ---
 
+### One-GPU inference rehearsal
+
+Use a staging API, an invited customer account and one team-controlled Windows
+GPU. Provision the customer with `python -m orchestrator.seed_users CUSTOMER_EMAIL`
+in the staging orchestrator environment and share the generated password
+privately. Confirm the Windows app and browser point at the same API.
+
+1. Record the GPU model, VRAM, driver, Ollama version, model ID and digest,
+   Windows build, and provider executable SHA-256. Run one fixture directly in
+   Ollama and confirm the model is loaded on the GPU.
+2. Enrol and restart the packaged app under the same Windows account. Verify
+   the same machine reconnects and shows a fresh heartbeat. Approve it for
+   inference with the pilot command above.
+3. Sign in as the customer and issue a key under **Model APIs → API keys**.
+   Use the **Quickstart** to send these requests one at a time to the pinned
+   model. Use the same instruction each time. Classify the ticket and return
+   only one label from `account`, `billing`, and `technical`.
+
+   | Synthetic ticket | Expected label |
+   | --- | --- |
+   | I forgot my password and need a reset. | `account` |
+   | Can I change the email on my profile? | `account` |
+   | My sign-in code did not arrive. | `account` |
+   | Please send a copy of this month's invoice. | `billing` |
+   | I see two charges for the same order. | `billing` |
+   | Where can I change my payment card? | `billing` |
+   | The desktop app closes as soon as it opens. | `technical` |
+   | The upload stops at 50 percent every time. | `technical` |
+   | The status page loads blank in my browser. | `technical` |
+   | My connection drops whenever I start a request. | `technical` |
+
+4. Record the request and job IDs, assigned node, terminal outcome and
+   elapsed time. Check that the ten requests each have one terminal outcome
+   and that the ten completed requests each have one usage record. Record label
+   accuracy separately from delivery. Exclude keys and prompt text from the
+   shared evidence.
+5. Pause the machine and check that it takes no new claims. Approve it again,
+   revoke it from **Machines**, and restart the app. Verify that the revoked
+   machine fails to resume work and that the customer sees a capacity error
+   with no other eligible provider. Revoke the customer test key.
+
 ## 2. Runtime architecture
 
 ### 2.1 Threading, and why it is shaped this way

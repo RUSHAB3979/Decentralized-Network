@@ -18,7 +18,6 @@ import {
   fetchCurrentUser,
   login as loginRequest,
   logout as logoutRequest,
-  signup as signupRequest,
   storedToken,
 } from '../services/authApi';
 
@@ -68,12 +67,6 @@ function useSessionState() {
     return () => window.removeEventListener('storage', onStorage);
   }, [verify]);
 
-  const signup = useCallback(async (fields) => {
-    const session = await signupRequest(fields);
-    setState({ status: 'authenticated', user: session.user, error: null });
-    return session;
-  }, []);
-
   const login = useCallback(async (fields) => {
     const session = await loginRequest(fields);
     setState({ status: 'authenticated', user: session.user, error: null });
@@ -93,7 +86,7 @@ function useSessionState() {
     setState({ status: 'anonymous', user: null, error: null });
   }, []);
 
-  return { ...state, signup, login, logout, invalidate, refresh: verify };
+  return { ...state, login, logout, invalidate, refresh: verify };
 }
 
 

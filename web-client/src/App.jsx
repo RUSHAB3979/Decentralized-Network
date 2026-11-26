@@ -57,7 +57,7 @@ const App = () => {
         window.scrollTo({ top: 0, behavior: 'auto' });
     };
     if (route === '/login' || route === '/signup') {
-        return <AuthPage initialMode={route === '/signup' ? 'signup' : 'login'}/>;
+        return <AuthPage />;
     }
     if (['/provider', '/provider/login', '/provider/signup', '/app/provider'].includes(route)) {
         return <ProviderConsolePage route={route} onNavigate={navigate}/>;
@@ -74,7 +74,7 @@ const App = () => {
       </div>);
         }
         if (session.status === 'anonymous') {
-            return <AuthPage initialMode="login"/>;
+            return <AuthPage />;
         }
         if (session.status === 'error') {
             // The session may be perfectly valid; we could not check it. Saying

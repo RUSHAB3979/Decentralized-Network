@@ -228,8 +228,8 @@ $s = Invoke-RestMethod -Method Post http://localhost:8080/v1/auth/login `
   Select-Object hostname, liveness, accepts_work, last_heartbeat_at
 ```
 
-If this deployment has `SIGNUPS_OPEN=false`, there is no signup form to make
-that account with — create one directly instead:
+The web console uses invited customer accounts. Provision a pilot account in
+the orchestrator environment and share the generated password privately:
 
 ```powershell
 python -m orchestrator.seed_users you@example.com
